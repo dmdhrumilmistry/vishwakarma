@@ -45,6 +45,8 @@ const (
 const (
 	ExposeCluster  = "cluster"
 	ExposeNodePort = "nodeport"
+	// ExposeHost is a macOS VM: ports are forwarded on the Mac host.
+	ExposeHost = "host"
 )
 
 // ContainerName is the name of the sandbox container in its pod.
@@ -82,28 +84,34 @@ type Spec struct {
 
 // Sandbox is the view of a sandbox returned by the API.
 type Sandbox struct {
-	Name       string     `json:"name"`
-	Kind       string     `json:"kind"`
-	Template   string     `json:"template,omitempty"`
-	Image      string     `json:"image"`
-	Owner      string     `json:"owner"`
-	Status     string     `json:"status"`
-	Message    string     `json:"message,omitempty"`
-	CreatedAt  time.Time  `json:"createdAt"`
-	ExpiresAt  time.Time  `json:"expiresAt"`
-	CPU        string     `json:"cpu"`
-	Memory     string     `json:"memory"`
-	Disk       string     `json:"disk,omitempty"`
-	Privileged bool       `json:"privileged,omitempty"`
-	User       string     `json:"user,omitempty"`
-	Node       string     `json:"node,omitempty"`
-	IP         string     `json:"ip,omitempty"`
-	Expose     string     `json:"expose,omitempty"`
-	Endpoints  []Endpoint `json:"endpoints"`
+	Name       string    `json:"name"`
+	Kind       string    `json:"kind"`
+	Template   string    `json:"template,omitempty"`
+	Image      string    `json:"image"`
+	Owner      string    `json:"owner"`
+	Status     string    `json:"status"`
+	Message    string    `json:"message,omitempty"`
+	CreatedAt  time.Time `json:"createdAt"`
+	ExpiresAt  time.Time `json:"expiresAt"`
+	CPU        string    `json:"cpu"`
+	Memory     string    `json:"memory"`
+	Disk       string    `json:"disk,omitempty"`
+	Privileged bool      `json:"privileged,omitempty"`
+	User       string    `json:"user,omitempty"`
+	Node       string    `json:"node,omitempty"`
+	IP         string    `json:"ip,omitempty"`
+	Expose     string    `json:"expose,omitempty"`
+	// Host is the Mac a macOS VM runs on.
+	Host string `json:"host,omitempty"`
+	// Simulated marks a macOS VM from the agent simulator (no real guest).
+	Simulated bool       `json:"simulated,omitempty"`
+	Endpoints []Endpoint `json:"endpoints"`
 }
 
 // Endpoint is one exposed port.
 type Endpoint struct {
+	// Name labels well-known ports: ssh, vnc (macOS VMs).
+	Name     string `json:"name,omitempty"`
 	Port     int32  `json:"port"`
 	NodePort int32  `json:"nodePort,omitempty"`
 	Protocol string `json:"protocol"`
@@ -116,6 +124,8 @@ type Endpoint struct {
 type Credentials struct {
 	User     string `json:"user"`
 	Password string `json:"password,omitempty"`
+	// VNCPassword opens the screen of a macOS VM.
+	VNCPassword string `json:"vncPassword,omitempty"`
 }
 
 // Caller is the user a request acts for.
@@ -126,9 +136,10 @@ type Caller struct {
 
 // Errors the API maps to HTTP statuses.
 var (
-	ErrNotFound    = errors.New("sandbox not found")
-	ErrExists      = errors.New("a sandbox with this name already exists")
-	ErrUnavailable = errors.New("virtual machines are not available: KubeVirt is not installed or vm.enabled is false")
+	ErrNotFound         = errors.New("sandbox not found")
+	ErrExists           = errors.New("a sandbox with this name already exists")
+	ErrUnavailable      = errors.New("virtual machines are not available: KubeVirt is not installed or vm.enabled is false")
+	ErrMacOSUnavailable = errors.New("macOS is not available: no Mac host agent is configured or reachable")
 )
 
 // InvalidError is a request the policy rejects.

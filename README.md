@@ -1,9 +1,9 @@
 # Vishwakarma
 
-Self-hosted, throwaway **VMs and containers on Kubernetes** for testing apps
-and endpoint tools. Pick a template or bring your own image, get a browser
-terminal in seconds, expose ports, and let it delete itself when its time runs
-out.
+Self-hosted, throwaway **containers, Linux VMs, Android and macOS** for
+testing apps and endpoint tools, run from Kubernetes. Pick a template or
+bring your own image, get a browser terminal in seconds, expose ports, and
+let it delete itself when its time runs out.
 
 Named after the divine architect and builder of Hindu tradition.
 
@@ -14,8 +14,15 @@ Named after the divine architect and builder of Hindu tradition.
   installed: full guests with their own kernel and systemd, for agents that
   need a real OS. Cloud-init sets up a login user, a generated password and
   your SSH key.
+- **Android** in a container ([redroid](https://github.com/remote-android/redroid-doc)):
+  Android 12 with `adb` and scrcpy access and a persistent `/data`.
+- **macOS** on Mac hosts through [Tart](https://tart.run): each Mac runs
+  `vishwakarma agent`; the server drives it. macOS Sequoia and Tahoe, and an
+  Xcode image for the iOS Simulator, with an SSH terminal, VNC screen and
+  port forwarding. A simulator backend lets you try the flow on a Linux
+  cluster.
 - **Browser terminal** (xterm.js): an exec shell for containers, the serial
-  console for VMs. No kubectl needed.
+  console for VMs, SSH for macOS. No kubectl needed.
 - **Automatic expiry**: every sandbox has a TTL (default 4h, max 72h) and is
   deleted when it lapses. Extend it from the console or the API.
 - **Isolation**: each sandbox gets a NetworkPolicy. It accepts traffic only on
@@ -57,6 +64,8 @@ detects it automatically.
 | [docs/architecture.md](docs/architecture.md) | How it works, objects created per sandbox, security model |
 | [docs/configuration.md](docs/configuration.md) | Policy file, templates, environment variables, auth modes |
 | [docs/vms.md](docs/vms.md) | Installing KubeVirt (including on hosts without `/dev/kvm`) |
+| [docs/android.md](docs/android.md) | Android sandboxes: binder, adb, scrcpy |
+| [docs/macos.md](docs/macos.md) | macOS and the iOS Simulator on Mac hosts, the agent, the simulator |
 | [docs/api.md](docs/api.md) | REST API and terminal WebSocket protocol |
 | [docs/development.md](docs/development.md) | Building, testing and running locally |
 

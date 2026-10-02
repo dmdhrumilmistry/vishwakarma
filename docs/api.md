@@ -25,7 +25,7 @@ removed.
 | `POST /sandboxes/{name}/stop` | | `Sandbox` |
 | `POST /sandboxes/{name}/start` | | `Sandbox` |
 | `POST /sandboxes/{name}/extend` | `{"ttl": "4h"}` | `Sandbox`, expiry set to now + ttl |
-| `GET /sandboxes/{name}/credentials` | | `{"user", "password"}` (VMs) |
+| `GET /sandboxes/{name}/credentials` | | `{"user", "password", "vncPassword"}` (VMs and macOS) |
 | `GET /sandboxes/{name}/logs?tail=500` | | text/plain, main container output (containers) |
 | `GET /sandboxes/{name}/terminal` | | WebSocket, see below |
 
@@ -41,20 +41,20 @@ users' sandboxes), 409 name taken or sandbox not running, 429 sign-in locked.
 ```json
 {
   "name": "web",                 // required, DNS label, at most 40 characters
-  "kind": "container",           // container | vm; defaults to the template's
+  "kind": "container",           // container | vm | macos; defaults to the template's
   "template": "ubuntu-24.04",    // or omit and give image
   "image": "nginx:1.29",         // needs allowCustomImages
   "command": ["nginx", "-g", "daemon off;"],
   "args": [],
   "env": {"KEY": "value"},       // containers
   "ports": [80, 443],            // TCP; VMs default to [22]
-  "expose": "cluster",           // cluster | nodeport
+  "expose": "cluster",           // cluster | nodeport; macOS always forwards on the Mac
   "cpu": "500m",
   "memory": "512Mi",
-  "disk": "10Gi",                // persistent /data volume, containers only
+  "disk": "10Gi",                // /data volume for containers; disk size for macOS
   "ttl": "4h",                   // default policy defaultTTL, max maxTTL
   "privileged": false,           // containers, needs allowPrivileged
-  "sshKey": "ssh-ed25519 AAAA..." // VMs
+  "sshKey": "ssh-ed25519 AAAA..." // VMs and macOS
 }
 ```
 
@@ -70,6 +70,10 @@ users' sandboxes), 409 name taken or sandbox not running, 429 sign-in locked.
   "endpoints": [{"port": 80, "nodePort": 31765, "protocol": "TCP", "address": "192.0.2.10:31765"}]
 }
 ```
+
+macOS sandboxes add `"host"` (the Mac), `"simulated"` (from the agent
+simulator), and endpoints with `"name": "ssh"` or `"vnc"` whose `address` is
+`<mac>:<hostPort>`. Their credentials include `"vncPassword"`.
 
 `status` is one of `Pending`, `Running`, `Stopped`, `Failed`, `Terminating`;
 `message` explains Pending and Failed (for example `ImagePullBackOff: ...`).
@@ -87,7 +91,8 @@ token.
   `session ended`.
 
 Containers get an exec session (`bash`, falling back to `sh`, or the
-template `shell`); VMs get the serial console. The server pings every 25
+template `shell`); VMs get the serial console; macOS gets SSH through the
+Mac agent, which speaks the same protocol. The server pings every 25
 seconds to keep proxies from dropping idle sessions.
 
 Example with [websocat](https://github.com/vi/websocat):

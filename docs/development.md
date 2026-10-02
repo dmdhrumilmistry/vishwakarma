@@ -7,10 +7,11 @@ cluster for manual testing (k3s, kind or minikube).
 
 | Path | What |
 |---|---|
-| `cmd/vishwakarma` | `serve`, `check-config`, `version` |
+| `cmd/vishwakarma` | `serve`, `agent`, `check-config`, `version` |
 | `internal/config` | environment and policy file, defaults, validation |
 | `internal/sandbox` | spec validation, object builders, list/status, lifecycle, reaper |
 | `internal/kube` | clients, pod exec, KubeVirt serial console, API server discovery |
+| `internal/macos` | Mac host agent (Tart and simulator backends, forwarding, SSH) and the server's Pool client |
 | `internal/auth` | password sessions, header mode, bearer token, sign-in limiter |
 | `internal/api` | REST handlers, error mapping, terminal WebSocket bridge |
 | `internal/web/static` | console: vanilla ES modules embedded with `go:embed`, vendored xterm.js |
@@ -44,6 +45,14 @@ make run
 
 The console is at http://localhost:8080. Without `dev/config.yaml` the
 built-in policy is used.
+
+To work on macOS without a Mac, run a simulator agent next to it and point
+`macos.agents` in `dev/config.yaml` at `http://localhost:8484`, with the same
+token in `VK_MACOS_TOKEN` and `VK_AGENT_TOKEN`:
+
+```bash
+vishwakarma agent --backend simulator --public-host 127.0.0.1
+```
 
 ## Deploy a dev build to k3s without a registry
 

@@ -29,6 +29,7 @@ vishwakarma check-config config.yaml
 | `VK_SECURE_COOKIES` | `true` | Secure flag on the cookie; turn off only for plain HTTP on a non-localhost address |
 | `VK_AUTH_USER_HEADER` | `X-Forwarded-User` | User header (header mode) |
 | `VK_ADMIN_USERS` | | Comma-separated admin users (header mode) |
+| `VK_MACOS_TOKEN` | | Token for the Mac host agents; required when `macos.agents` is set |
 
 ## Auth modes
 
@@ -53,6 +54,7 @@ maxTTL: 72h
 maxSandboxesPerUser: 5          # admins are exempt; 0 for unlimited
 allowCustomImages: true
 allowPrivileged: false
+allowPrivilegedTemplates: false # privileged only from templates marked so (Android)
 allowNodePort: true
 storageClass: ""                # for /data volumes; empty = cluster default
 defaults: {cpu: "1", memory: 1Gi, disk: 10Gi}
@@ -64,6 +66,12 @@ network:
   blockAPIServer: true
 vm:
   enabled: auto                 # auto | true | false
+macos:
+  agents:                       # Mac hosts running `vishwakarma agent`
+    - name: mac-mini-1
+      url: http://192.168.1.20:8484
+      insecureSkipVerify: false
+  vnc: true
 imagePullSecrets: []
 nodeSelector: {}
 tolerations: []
@@ -89,14 +97,14 @@ templates:
   - name: ubuntu-24.04            # lowercase, digits, '-' and '.'
     displayName: Ubuntu 24.04
     description: Ubuntu userland in a container
-    kind: container               # container | vm
+    kind: container               # container | vm | macos
     image: ubuntu:24.04
     command: [sleep, infinity]    # keeps base OS images running
     args: []
     shell: /bin/bash              # terminal shell; default tries bash then sh
     ports: [8080]
     env: {MODE: test}
-    privileged: false             # needs allowPrivileged
+    privileged: false             # needs allowPrivileged or allowPrivilegedTemplates
     resources: {cpu: "2", memory: 2Gi, disk: 20Gi}
 
   - name: ubuntu-24.04-vm
@@ -105,6 +113,15 @@ templates:
     image: quay.io/containerdisks/ubuntu:24.04   # a KubeVirt containerDisk
     user: ubuntu                  # cloud-init login user
     resources: {memory: 2Gi}
+
+  - name: macos-sequoia
+    displayName: macOS Sequoia
+    kind: macos
+    image: ghcr.io/cirruslabs/macos-sequoia-base:latest   # any Tart image
+    user: admin                   # the login baked into the image
+    password: admin               # replaced on first boot...
+    keepPassword: false           # ...unless this is true
+    resources: {cpu: "4", memory: 8Gi, disk: 80Gi}        # disk can only grow
     # cloudInit: |                # replaces the generated user data entirely
     #   #cloud-config
     #   ...

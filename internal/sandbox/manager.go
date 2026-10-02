@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math/big"
@@ -25,6 +26,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 
 	"github.com/dmdhrumilmistry/vishwakarma/internal/config"
+	"github.com/dmdhrumilmistry/vishwakarma/internal/macos"
 )
 
 // Manager creates and manages sandboxes in one namespace.
@@ -41,6 +43,12 @@ type Manager struct {
 	vmMu      sync.Mutex
 	vmCached  bool
 	vmChecked time.Time
+
+	// mac runs macOS sandboxes on Mac host agents; nil when not configured.
+	mac        *macos.Pool
+	macMu      sync.Mutex
+	macCached  bool
+	macChecked time.Time
 }
 
 // NewManager returns a Manager. vmProbe may be nil when VMs are disabled.
@@ -106,14 +114,20 @@ func (m *Manager) resolve(ctx context.Context, s Spec, caller Caller) (*plan, er
 	if p.Kind == "" {
 		p.Kind = config.KindContainer
 	}
-	if p.Kind != config.KindContainer && p.Kind != config.KindVM {
-		return nil, invalid("kind must be container or vm")
+	if p.Kind != config.KindContainer && p.Kind != config.KindVM && p.Kind != config.KindMacOS {
+		return nil, invalid("kind must be container, vm or macos")
 	}
 	if tpl.Name != "" && tpl.Kind != p.Kind {
 		return nil, invalid("template %q makes a %s, not a %s", tpl.Name, tpl.Kind, p.Kind)
 	}
 	if p.Kind == config.KindVM && !m.VMsAvailable(ctx) {
 		return nil, ErrUnavailable
+	}
+	if p.Kind == config.KindMacOS && !m.MacOSAvailable(ctx) {
+		return nil, ErrMacOSUnavailable
+	}
+	if p.Kind == config.KindMacOS && (len(s.Command) > 0 || len(s.Args) > 0 || len(s.Env) > 0) {
+		return nil, invalid("command, args and env apply to containers only")
 	}
 
 	custom := s.Image != "" || len(s.Command) > 0 || len(s.Args) > 0
@@ -163,6 +177,16 @@ func (m *Manager) resolve(ctx context.Context, s Spec, caller Caller) (*plan, er
 	if ports == nil && p.Kind == config.KindVM {
 		ports = []int32{22}
 	}
+	if p.Kind == config.KindMacOS {
+		// SSH (and VNC) are always forwarded; drop duplicates of them.
+		var rest []int32
+		for _, port := range ports {
+			if port != 22 && port != 5900 {
+				rest = append(rest, port)
+			}
+		}
+		ports = rest
+	}
 	if len(ports) > 16 {
 		return nil, invalid("at most 16 ports")
 	}
@@ -182,9 +206,12 @@ func (m *Manager) resolve(ctx context.Context, s Spec, caller Caller) (*plan, er
 	if p.Expose == "" {
 		p.Expose = ExposeCluster
 	}
-	switch p.Expose {
-	case ExposeCluster:
-	case ExposeNodePort:
+	switch {
+	case p.Kind == config.KindMacOS:
+		// Mac hosts forward ports on their own address.
+		p.Expose = ExposeHost
+	case p.Expose == ExposeCluster:
+	case p.Expose == ExposeNodePort:
 		if !pol.AllowNodePort {
 			return nil, invalid("NodePort exposure is disabled")
 		}
@@ -192,11 +219,19 @@ func (m *Manager) resolve(ctx context.Context, s Spec, caller Caller) (*plan, er
 		return nil, invalid("expose must be %s or %s", ExposeCluster, ExposeNodePort)
 	}
 
-	p.Privileged = s.Privileged || tpl.Privileged
-	if p.Privileged && !pol.AllowPrivileged {
+	if s.Privileged && !pol.AllowPrivileged {
 		return nil, invalid("privileged sandboxes are disabled by the administrator")
 	}
-	if p.Privileged && p.Kind == config.KindVM {
+	if tpl.Privileged && !pol.AllowPrivileged {
+		if !pol.AllowPrivilegedTemplates {
+			return nil, invalid("template %q needs a privileged container, which the administrator has disabled", tpl.Name)
+		}
+		if custom {
+			return nil, invalid("template %q runs privileged, so it must keep its own image and command", tpl.Name)
+		}
+	}
+	p.Privileged = s.Privileged || tpl.Privileged
+	if p.Privileged && p.Kind != config.KindContainer {
 		return nil, invalid("privileged applies to containers only; a VM already has its own kernel")
 	}
 
@@ -229,18 +264,28 @@ func (m *Manager) resolve(ctx context.Context, s Spec, caller Caller) (*plan, er
 	}
 	p.ExpiresAt = m.now().Add(ttl).Truncate(time.Second)
 
-	if p.Kind == config.KindVM {
+	switch p.Kind {
+	case config.KindVM:
 		p.User = tpl.User
 		if p.User == "" {
 			p.User = "vishwakarma"
 		}
 		p.Password = randomPassword(16)
-		p.SSHKey = strings.TrimSpace(s.SSHKey)
-		if p.SSHKey != "" && (len(p.SSHKey) > 4096 || !sshKey.MatchString(p.SSHKey)) {
-			return nil, invalid("sshKey must be a single OpenSSH public key line")
+	case config.KindMacOS:
+		// macOS images ship a fixed login; the agent replaces the password
+		// on first boot unless the template says to keep it.
+		p.User, p.Password, p.KeepPassword = tpl.User, tpl.Password, tpl.KeepPassword
+		if p.User == "" {
+			p.User, p.Password = "admin", "admin"
 		}
-	} else if s.SSHKey != "" {
-		return nil, invalid("sshKey applies to VMs only")
+	default:
+		if s.SSHKey != "" {
+			return nil, invalid("sshKey applies to VMs only")
+		}
+	}
+	p.SSHKey = strings.TrimSpace(s.SSHKey)
+	if p.SSHKey != "" && (len(p.SSHKey) > 4096 || !sshKey.MatchString(p.SSHKey)) {
+		return nil, invalid("sshKey must be a single OpenSSH public key line")
 	}
 	return p, nil
 }
@@ -285,6 +330,14 @@ func (m *Manager) Create(ctx context.Context, s Spec, caller Caller) (*Sandbox, 
 		return nil, err
 	} else if exists {
 		return nil, ErrExists
+	}
+
+	if p.Kind == config.KindMacOS {
+		if err := m.createMac(ctx, p); err != nil {
+			return nil, err
+		}
+		m.log.Info("sandbox created", "name", p.Name, "kind", p.Kind, "image", p.Image, "owner", p.Owner, "expires", p.ExpiresAt)
+		return m.Get(ctx, p.Name, caller)
 	}
 
 	ns := m.policy.Namespace
@@ -364,6 +417,9 @@ func (m *Manager) exists(ctx context.Context, name string) (bool, error) {
 		} else if !apierrors.IsNotFound(err) {
 			return false, err
 		}
+	}
+	if len(m.macList(ctx, labels.Set{LabelSandbox: name})) > 0 {
+		return true, nil
 	}
 	return false, nil
 }
@@ -477,6 +533,7 @@ func (m *Manager) list(ctx context.Context, extra labels.Set) ([]Sandbox, error)
 			}
 		}
 	}
+	out = append(out, m.macList(ctx, extra)...)
 	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) })
 	return out, nil
 }
@@ -513,10 +570,25 @@ func (m *Manager) Delete(ctx context.Context, name string, caller Caller) error 
 	if err != nil {
 		return err
 	}
-	if err := m.deletePrimary(ctx, s.Name, s.Kind); err != nil && !apierrors.IsNotFound(err) {
+	if err := m.remove(ctx, s); err != nil {
 		return err
 	}
 	m.log.Info("sandbox deleted", "name", name, "by", caller.Name)
+	return nil
+}
+
+// remove deletes any kind of sandbox.
+func (m *Manager) remove(ctx context.Context, s *Sandbox) error {
+	if s.Kind == config.KindMacOS {
+		err := macErr(m.mac.Delete(ctx, s.Host, s.Name))
+		if errors.Is(err, ErrNotFound) {
+			return nil
+		}
+		return err
+	}
+	if err := m.deletePrimary(ctx, s.Name, s.Kind); err != nil && !apierrors.IsNotFound(err) {
+		return err
+	}
 	return nil
 }
 
@@ -538,7 +610,11 @@ func (m *Manager) SetRunning(ctx context.Context, name string, running bool, cal
 		return nil, err
 	}
 	ns := m.policy.Namespace
-	if s.Kind == config.KindVM {
+	if s.Kind == config.KindMacOS {
+		if err := macErr(m.mac.SetRunning(ctx, s.Host, name, running)); err != nil {
+			return nil, err
+		}
+	} else if s.Kind == config.KindVM {
 		strategy := "Halted"
 		if running {
 			strategy = "Always"
@@ -574,6 +650,12 @@ func (m *Manager) Extend(ctx context.Context, name, ttl string, caller Caller) (
 	if err != nil {
 		return nil, err
 	}
+	if s.Kind == config.KindMacOS {
+		if err := macErr(m.mac.Extend(ctx, s.Host, name, m.now().Add(d).Truncate(time.Second).UTC())); err != nil {
+			return nil, err
+		}
+		return m.Get(ctx, name, caller)
+	}
 	expires := m.now().Add(d).Truncate(time.Second).UTC().Format(time.RFC3339)
 	patch, _ := json.Marshal(map[string]any{"metadata": map[string]any{"annotations": map[string]any{AnnExpiresAt: expires}}})
 	ns := m.policy.Namespace
@@ -593,6 +675,13 @@ func (m *Manager) Credentials(ctx context.Context, name string, caller Caller) (
 	s, err := m.Get(ctx, name, caller)
 	if err != nil {
 		return nil, err
+	}
+	if s.Kind == config.KindMacOS {
+		c, err := m.mac.Credentials(ctx, s.Host, name)
+		if err != nil {
+			return nil, macErr(err)
+		}
+		return &Credentials{User: c.User, Password: c.Password, VNCPassword: c.VNCPassword}, nil
 	}
 	if s.Kind != config.KindVM {
 		return nil, invalid("containers have no login; use the terminal")
@@ -635,7 +724,7 @@ func (m *Manager) Reap(ctx context.Context) (int, error) {
 		if s.ExpiresAt.IsZero() || s.ExpiresAt.After(now) || s.Status == StatusTerminating {
 			continue
 		}
-		if err := m.deletePrimary(ctx, s.Name, s.Kind); err != nil && !apierrors.IsNotFound(err) {
+		if err := m.remove(ctx, &s); err != nil {
 			m.log.Error("reap failed", "name", s.Name, "err", err)
 			continue
 		}

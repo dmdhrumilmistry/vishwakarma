@@ -1,0 +1,174 @@
+# macOS sandboxes (and the iOS Simulator)
+
+macOS guests need Apple's Virtualization.framework, which only exists on
+macOS on Apple hardware, and Apple's license only permits macOS VMs there.
+So macOS sandboxes do not run as pods. Instead each Mac runs
+`vishwakarma agent`, which drives [Tart](https://tart.run), and the
+Vishwakarma server (in your cluster) calls it:
+
+```
+browser --> vishwakarma (in k3s) --HTTP + token--> vishwakarma agent (on the Mac)
+                                                      |-- tart clone / run / stop / delete
+                                                      |-- SSH into the guest (terminal, password)
+                                                      +-- forwards guest ports to Mac host ports
+```
+
+There is no iOS VM. The iOS Simulator runs inside macOS with Xcode, so use
+the `macos-xcode` template and drive it with `xcrun simctl` in the terminal
+or over VNC.
+
+## Requirements
+
+- An Apple Silicon Mac (Tart does not support Intel Macs) on macOS 13 or
+  later, reachable from the cluster.
+- [Tart](https://tart.run): `brew install cirruslabs/cli/tart`.
+- At most **two macOS VMs run at once per Mac**: Apple's license allows two
+  guest instances and Virtualization.framework enforces it. The agent
+  defaults `--max-running` to 2 and the server places new VMs on the Mac
+  with the most free slots.
+- Disk: macOS images are large (the base image is about 25 GB, the Xcode
+  image over 60 GB). The first pull takes a while; later clones are fast.
+
+## Set up a Mac
+
+1. Get the shared agent token from the cluster:
+
+   ```bash
+   kubectl get secret -n vishwakarma vishwakarma-secrets \
+     -o jsonpath='{.data.macosToken}' | base64 -d > vk-agent-token
+   ```
+
+   Copy it to the Mac, e.g. `~/.vishwakarma/token`, and `chmod 600` it.
+
+2. Install the agent: download `vishwakarma-darwin-arm64` from the
+   [releases](https://github.com/dmdhrumilmistry/vishwakarma/releases) to
+   `/usr/local/bin/vishwakarma` and `chmod +x` it.
+
+3. Try it in a terminal on the Mac:
+
+   ```bash
+   vishwakarma agent --public-host 192.168.1.20 --token-file ~/.vishwakarma/token
+   ```
+
+   `--public-host` is the address people use to reach forwarded ports: the
+   Mac's LAN IP or DNS name.
+
+4. Run it at login with a LaunchAgent (not a LaunchDaemon:
+   Virtualization.framework only starts guests inside a logged-in user
+   session). Copy [packaging/macos/io.vishwakarma.agent.plist](../packaging/macos/io.vishwakarma.agent.plist)
+   to `~/Library/LaunchAgents/`, edit the public host and paths, then:
+
+   ```bash
+   launchctl load -w ~/Library/LaunchAgents/io.vishwakarma.agent.plist
+   ```
+
+   For an unattended Mac (a Mac mini in a rack) turn on automatic login so
+   the session exists after a reboot.
+
+5. Register the Mac in the chart and upgrade:
+
+   ```yaml
+   macos:
+     agents:
+       - name: mac-mini-1
+         url: http://192.168.1.20:8484
+   ```
+
+The macOS kind then shows up in the console. Check the agent from the
+cluster with `curl http://192.168.1.20:8484/healthz`.
+
+### k3s running on the Mac itself
+
+k3s cannot run natively on macOS; on a Mac it runs inside a Linux VM (Lima,
+Colima, Rancher Desktop, OrbStack). The agent still runs natively on the
+Mac, next to that VM, and the server reaches it through the host address
+the VM provides:
+
+| k3s runs in | Agent URL from the cluster |
+|---|---|
+| Lima / Colima / Rancher Desktop | `http://host.lima.internal:8484` |
+| OrbStack | `http://host.orb.internal:8484` |
+| Docker Desktop's Kubernetes | `http://host.docker.internal:8484` |
+
+Use the Mac's LAN IP as `--public-host` so users outside the Mac can reach
+forwarded ports.
+
+### Agent flags
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--backend` | `tart` | `tart`, or `simulator` for testing without a Mac |
+| `--listen` | `:8484` | Agent API address |
+| `--public-host` | (required) | Address users reach forwarded ports on |
+| `--token-file` | `$VK_AGENT_TOKEN` | Shared token file |
+| `--name` | hostname | Host name shown in the console |
+| `--state` | `~/.vishwakarma/agent.json` | VM records, mode 0600 (holds guest passwords) |
+| `--port-min`, `--port-max` | `20000`, `20999` | Host ports for forwarding |
+| `--bind` | `0.0.0.0` | Address forwarded ports listen on |
+| `--max-running` | 2 (tart) | VMs running at once |
+| `--allow-images` | any | Comma-separated image prefixes, e.g. `ghcr.io/cirruslabs/` |
+| `--tls-cert`, `--tls-key` | | Serve the agent API over TLS |
+
+## What a macOS sandbox gets
+
+- **Image**: any Tart image, by OCI reference. The built-in templates use
+  [Cirrus Labs images](https://github.com/cirruslabs/macos-image-templates)
+  (`macos-sequoia-base`, `macos-tahoe-base`, `macos-sequoia-xcode`), which
+  ship user `admin` / password `admin` with SSH on.
+- **Login**: on first boot the agent replaces the image password with a
+  generated one (set `keepPassword: true` on a template to skip that) and
+  adds your SSH key if you gave one. See them on the Overview tab.
+- **Terminal**: an SSH session into the guest, relayed through the agent.
+  The guest host key is pinned on first use.
+- **Screen**: with `macos.vnc` on (default), Tart's built-in VNC server is
+  forwarded. Open it with `open vnc://<mac>:<port>` (Screen Sharing on a Mac)
+  or any VNC client, using the VNC password from the Overview tab.
+- **Ports**: SSH, VNC and every port you expose are forwarded to host ports
+  on the Mac in `--port-min`..`--port-max`. They stay the same across a stop
+  and start.
+- **Lifecycle**: stop and start keep the VM disk (unlike KubeVirt
+  containerDisks). Delete removes the VM and its disk. Expiry works like for
+  every other sandbox; the agent also deletes VMs more than 10 minutes past
+  expiry by itself, in case the server is gone.
+- **Restarts**: VMs keep running if the agent restarts; the agent adopts
+  them again from its state file (the VNC port is lost until the VM is
+  restarted).
+
+## Trying it without a Mac: the simulator
+
+For a Linux cluster (development, CI, a lab) the chart can run an agent in
+the cluster with the simulator backend:
+
+```yaml
+macos:
+  simulator:
+    enabled: true
+sandboxes:
+  publicHost: 192.168.29.57   # a node IP
+```
+
+macOS sandboxes then go through the whole flow (create, pull, boot, stop,
+start, extend, delete, expiry), the terminal is a small fake shell, and
+forwarded ports (published as NodePorts `30500`-`30509`) answer with a
+banner. Everything is marked **Simulated** in the console. There is no real
+macOS guest: running macOS on Linux would need KVM and break Apple's
+license, so the simulator stops at the agent boundary on purpose.
+
+Run the simulator on any machine for development:
+
+```bash
+VK_AGENT_TOKEN=$(openssl rand -hex 20) vishwakarma agent --backend simulator --public-host 127.0.0.1
+```
+
+## Security
+
+- The agent token is the only credential between the server and a Mac; it
+  is generated by the chart and must be at least 24 characters. Keep the
+  agent API on a trusted network or put it behind TLS (`--tls-cert`).
+- The agent only manages Tart VMs it created (names start with `vk-`), and
+  `--allow-images` can pin images to trusted registries.
+- Forwarded ports are open on the Mac's address to anyone who can reach it,
+  like NodePorts. Guest passwords are random after first boot.
+- Guests share the Mac's network through Tart's NAT. They are not isolated
+  from your LAN the way container sandboxes are isolated by NetworkPolicy;
+  use the Mac's firewall or a separate network if that matters.

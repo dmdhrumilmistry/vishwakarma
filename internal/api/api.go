@@ -127,9 +127,14 @@ type templateView struct {
 func (s *Server) info(w http.ResponseWriter, r *http.Request, c sandbox.Caller) {
 	p := s.mgr.Policy()
 	vms := s.mgr.VMsAvailable(r.Context())
+	mac := s.mgr.MacOSAvailable(r.Context())
 	tpls := []templateView{}
 	for _, t := range p.Templates {
-		if t.Kind == config.KindVM && !vms {
+		// Only offer what this caller can actually create.
+		if (t.Kind == config.KindVM && !vms) || (t.Kind == config.KindMacOS && !mac) {
+			continue
+		}
+		if t.Privileged && !p.AllowPrivileged && !p.AllowPrivilegedTemplates {
 			continue
 		}
 		name := t.DisplayName
@@ -148,6 +153,7 @@ func (s *Server) info(w http.ResponseWriter, r *http.Request, c sandbox.Caller) 
 		"authMode":  s.auth.Mode(),
 		"namespace": p.Namespace,
 		"vms":       vms,
+		"macos":     mac,
 		"templates": tpls,
 		"policy": map[string]any{
 			"defaultTTL":          p.DefaultTTL,
@@ -290,7 +296,7 @@ func (s *Server) fail(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusNotFound, err.Error())
 	case errors.Is(err, sandbox.ErrExists):
 		writeError(w, http.StatusConflict, err.Error())
-	case errors.Is(err, sandbox.ErrUnavailable):
+	case errors.Is(err, sandbox.ErrUnavailable), errors.Is(err, sandbox.ErrMacOSUnavailable):
 		writeError(w, http.StatusBadRequest, err.Error())
 	case apierrors.IsForbidden(err):
 		writeError(w, http.StatusForbidden, err.Error())

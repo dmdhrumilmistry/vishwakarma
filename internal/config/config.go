@@ -19,6 +19,8 @@ import (
 const (
 	KindContainer = "container"
 	KindVM        = "vm"
+	// KindMacOS is a macOS VM on a Mac host agent (Tart).
+	KindMacOS = "macos"
 )
 
 // Auth modes.
@@ -36,6 +38,9 @@ type Config struct {
 
 	Auth   Auth
 	Policy Policy
+
+	// MacOSToken authenticates the server to macOS host agents.
+	MacOSToken string
 }
 
 // Auth holds authentication settings. Secrets come only from the environment.
@@ -71,14 +76,19 @@ type Policy struct {
 	MaxSandboxesPerUser int      `json:"maxSandboxesPerUser"`
 	AllowCustomImages   bool     `json:"allowCustomImages"`
 	AllowPrivileged     bool     `json:"allowPrivileged"`
-	AllowNodePort       bool     `json:"allowNodePort"`
-	StorageClass        string   `json:"storageClass"`
+	// AllowPrivilegedTemplates allows privileged containers only from
+	// templates the operator marked privileged (Android needs it), with
+	// their own image and command. AllowPrivileged allows any.
+	AllowPrivilegedTemplates bool   `json:"allowPrivilegedTemplates"`
+	AllowNodePort            bool   `json:"allowNodePort"`
+	StorageClass             string `json:"storageClass"`
 
 	Defaults Resources `json:"defaults"`
 	Limits   Resources `json:"limits"`
 
 	Network Network `json:"network"`
 	VM      VM      `json:"vm"`
+	MacOS   MacOS   `json:"macos"`
 
 	// ImagePullSecrets are attached to every sandbox pod.
 	ImagePullSecrets []string `json:"imagePullSecrets"`
@@ -119,6 +129,23 @@ type VM struct {
 	Enabled string `json:"enabled"`
 }
 
+// MacOS configures macOS VMs, which run on Mac hosts through an agent.
+type MacOS struct {
+	// Agents are the Mac hosts. Empty disables macOS sandboxes.
+	Agents []MacAgent `json:"agents"`
+	// VNC gives every macOS VM a VNC endpoint for its screen.
+	VNC bool `json:"vnc"`
+}
+
+// MacAgent is one Mac host running `vishwakarma agent`.
+type MacAgent struct {
+	Name string `json:"name"`
+	// URL of the agent API, e.g. http://mac-mini.lan:8484.
+	URL string `json:"url"`
+	// InsecureSkipVerify accepts any TLS certificate from the agent.
+	InsecureSkipVerify bool `json:"insecureSkipVerify"`
+}
+
 // Toleration mirrors the Kubernetes toleration fields that matter here.
 type Toleration struct {
 	Key      string `json:"key"`
@@ -140,8 +167,13 @@ type Template struct {
 	Args    []string `json:"args"`
 	// Shell started by the web terminal (containers). Empty picks bash, then sh.
 	Shell string `json:"shell"`
-	// User is the login user created by cloud-init (VMs).
+	// User is the login user created by cloud-init (VMs) or baked into the
+	// image (macOS).
 	User string `json:"user"`
+	// Password is the login baked into a macOS image. The agent replaces it
+	// with a generated one on first boot unless KeepPassword is set.
+	Password     string `json:"password"`
+	KeepPassword bool   `json:"keepPassword"`
 	// CloudInit replaces the generated cloud-init user data (VMs). Leave
 	// empty to get a user with a generated password and your SSH key.
 	CloudInit string `json:"cloudInit"`
@@ -198,6 +230,7 @@ func Load() (*Config, error) {
 			AdminUsers:    splitList(os.Getenv("VK_ADMIN_USERS")),
 			SecureCookies: env("VK_SECURE_COOKIES", "true") == "true",
 		},
+		MacOSToken: os.Getenv("VK_MACOS_TOKEN"),
 	}
 	ttl, err := time.ParseDuration(env("VK_SESSION_TTL", "12h"))
 	if err != nil {
@@ -259,7 +292,8 @@ func DefaultPolicy() *Policy {
 			// k3s defaults; override for other distributions.
 			BlockCIDRs: []string{"10.42.0.0/16", "10.43.0.0/16"},
 		},
-		VM: VM{Enabled: "auto"},
+		VM:    VM{Enabled: "auto"},
+		MacOS: MacOS{VNC: true},
 	}
 }
 
@@ -272,9 +306,22 @@ func DefaultTemplates() []Template {
 		{Name: "fedora", DisplayName: "Fedora", Kind: KindContainer, Image: "fedora:latest", Command: sleep, Description: "Fedora userland in a container"},
 		{Name: "alpine", DisplayName: "Alpine", Kind: KindContainer, Image: "alpine:3", Command: sleep, Shell: "/bin/sh", Description: "Minimal Alpine container"},
 		{Name: "kali", DisplayName: "Kali rolling", Kind: KindContainer, Image: "kalilinux/kali-rolling", Command: sleep, Description: "Kali Linux userland, tools not preinstalled"},
+		{
+			Name: "android-12", DisplayName: "Android 12", Kind: KindContainer,
+			Image:       "redroid/redroid:12.0.0_64only-latest",
+			Args:        []string{"androidboot.redroid_gpu_mode=guest"},
+			Shell:       "/system/bin/sh",
+			Privileged:  true,
+			Ports:       []int32{5555},
+			Resources:   Resources{CPU: "2", Memory: "2Gi"},
+			Description: "Android in a container (redroid). Connect with adb or scrcpy on port 5555. Needs the binder kernel module on the node",
+		},
 		{Name: "ubuntu-24.04-vm", DisplayName: "Ubuntu 24.04 VM", Kind: KindVM, Image: "quay.io/containerdisks/ubuntu:24.04", User: "ubuntu", Resources: Resources{Memory: "2Gi"}, Description: "Full Ubuntu VM with systemd and its own kernel"},
 		{Name: "fedora-vm", DisplayName: "Fedora VM", Kind: KindVM, Image: "quay.io/containerdisks/fedora:latest", User: "fedora", Resources: Resources{Memory: "2Gi"}, Description: "Full Fedora VM"},
 		{Name: "debian-12-vm", DisplayName: "Debian 12 VM", Kind: KindVM, Image: "quay.io/containerdisks/debian:12", User: "debian", Resources: Resources{Memory: "1Gi"}, Description: "Full Debian VM"},
+		{Name: "macos-sequoia", DisplayName: "macOS Sequoia", Kind: KindMacOS, Image: "ghcr.io/cirruslabs/macos-sequoia-base:latest", User: "admin", Password: "admin", Resources: Resources{CPU: "4", Memory: "8Gi"}, Description: "macOS 15 VM on a Mac host. Terminal over SSH, screen over VNC"},
+		{Name: "macos-tahoe", DisplayName: "macOS Tahoe", Kind: KindMacOS, Image: "ghcr.io/cirruslabs/macos-tahoe-base:latest", User: "admin", Password: "admin", Resources: Resources{CPU: "4", Memory: "8Gi"}, Description: "macOS 26 VM on a Mac host"},
+		{Name: "macos-xcode", DisplayName: "macOS with Xcode (iOS Simulator)", Kind: KindMacOS, Image: "ghcr.io/cirruslabs/macos-sequoia-xcode:latest", User: "admin", Password: "admin", Resources: Resources{CPU: "4", Memory: "8Gi"}, Description: "Xcode and iOS simulators; run them with xcrun simctl or over VNC. First pull is large"},
 		{Name: "cirros-vm", DisplayName: "CirrOS VM (tiny)", Kind: KindVM, Image: "quay.io/kubevirt/cirros-container-disk-demo:latest", User: "cirros", Resources: Resources{Memory: "256Mi"}, Description: "Tiny VM for smoke tests. Login cirros / gocubsgo"},
 	}
 }
@@ -306,6 +353,16 @@ func (p *Policy) Validate() error {
 			}
 		}
 	}
+	agents := map[string]bool{}
+	for i, a := range p.MacOS.Agents {
+		if !ValidName(a.Name) || agents[a.Name] {
+			errs = append(errs, fmt.Errorf("macos.agents[%d]: name must be a unique lowercase DNS label", i))
+		}
+		agents[a.Name] = true
+		if !strings.HasPrefix(a.URL, "http://") && !strings.HasPrefix(a.URL, "https://") {
+			errs = append(errs, fmt.Errorf("macos.agents[%d] (%s): url must start with http:// or https://", i, a.Name))
+		}
+	}
 	switch p.VM.Enabled {
 	case "auto", "true", "false":
 	default:
@@ -321,8 +378,8 @@ func (p *Policy) Validate() error {
 			errs = append(errs, fmt.Errorf("%s: duplicate name", where))
 		}
 		seen[t.Name] = true
-		if t.Kind != KindContainer && t.Kind != KindVM {
-			errs = append(errs, fmt.Errorf("%s: kind must be container or vm", where))
+		if t.Kind != KindContainer && t.Kind != KindVM && t.Kind != KindMacOS {
+			errs = append(errs, fmt.Errorf("%s: kind must be container, vm or macos", where))
 		}
 		if t.Image == "" {
 			errs = append(errs, fmt.Errorf("%s: image is required", where))
@@ -366,6 +423,9 @@ func (c *Config) Validate() error {
 	}
 	if len(c.Auth.SessionKey) < 32 {
 		errs = append(errs, errors.New("VK_SESSION_KEY must be at least 32 characters"))
+	}
+	if len(c.Policy.MacOS.Agents) > 0 && len(c.MacOSToken) < 24 {
+		errs = append(errs, errors.New("VK_MACOS_TOKEN must be at least 24 characters when macos.agents are configured"))
 	}
 	if c.Auth.APIToken != "" && len(c.Auth.APIToken) < 24 {
 		errs = append(errs, errors.New("VK_API_TOKEN must be at least 24 characters when set"))

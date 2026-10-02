@@ -26,6 +26,13 @@ and carry the labels `app.kubernetes.io/managed-by=vishwakarma`,
 | container | `Deployment <name>` (1 replica, Recreate) | `Service <name>` if ports, `PersistentVolumeClaim <name>-data` if a volume, `NetworkPolicy <name>` |
 | vm | `VirtualMachine <name>` (kubevirt.io/v1, containerDisk root) | `Secret <name>` (cloud-init and login), `Service <name>` (port 22 by default), `NetworkPolicy <name>` |
 
+macOS sandboxes are not Kubernetes objects: they live on Mac hosts, each
+running `vishwakarma agent` with Tart, and the server calls the agents over
+HTTP with a shared token (see [macos.md](macos.md)). The agent keeps its own
+state file and forwards SSH, VNC and exposed ports to host ports on the Mac.
+The server lists them alongside the cluster sandboxes and applies the same
+ownership, quota and expiry rules.
+
 Deleting the primary removes the children through garbage collection. The
 expiry is the `vishwakarma.io/expires-at` annotation on the primary; a reaper
 loop in the server deletes expired sandboxes every minute.
@@ -52,6 +59,13 @@ workload is hostile.
 - **Least privilege for the server.** A namespaced Role in the sandbox
   namespace, plus `get` on the single `kubernetes` EndpointSlice in `default`.
   No ClusterRole.
+- **Privileged templates** (`allowPrivilegedTemplates`) allow privileged
+  containers only from operator-defined templates with their own image and
+  command, for Android. Users cannot run their own image privileged that
+  way.
+- **macOS agents** authenticate the server with a token, manage only VMs
+  named `vk-*`, can restrict images with `--allow-images`, replace the image
+  password on first boot and pin each guest's SSH host key.
 - **Privileged containers are off by default.** A privileged container can
   take over its node. Turn `allowPrivileged` on only on clusters dedicated to
   testing (endpoint agents such as EDR sensors often need it). VMs are the

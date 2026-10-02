@@ -26,4 +26,4 @@ jobs:
       - name: no secrets
         # Cheap guard; real scanning belongs in a dedicated tool.
         run: |
-          ! git grep -nIE '(BEGIN [A-Z ]*PRIVATE KEY|client-key-data:|ghp_[A-Za-z0-9]{30,})' -- ':!*.md'
+          ! git grep -nIE '(BEGIN [A-Z ]*PRIVATE KEY|client-key-data:|ghp_[A-Za-z0-9]{30,})' -- ':!*.md' ':!.github'

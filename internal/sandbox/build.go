@@ -38,10 +38,12 @@ type plan struct {
 	Shell      string
 	User       string
 	Password   string
-	SSHKey     string
-	CloudInit  string
-	Owner      string
-	ExpiresAt  time.Time
+	// KeepPassword keeps a macOS image's own password.
+	KeepPassword bool
+	SSHKey       string
+	CloudInit    string
+	Owner        string
+	ExpiresAt    time.Time
 }
 
 func (p *plan) labels() map[string]string {

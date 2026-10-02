@@ -103,9 +103,12 @@ func (s *Server) terminal(w http.ResponseWriter, r *http.Request, c sandbox.Call
 		}
 	}()
 
-	if sb.Kind == config.KindVM {
+	switch sb.Kind {
+	case config.KindMacOS:
+		s.macTerminal(ctx, cancel, ws, out, sb)
+	case config.KindVM:
 		s.vmConsole(ctx, cancel, ws, out, sb.Name)
-	} else {
+	default:
 		s.execShell(ctx, cancel, ws, out, pod, s.shellFor(sb))
 	}
 	s.log.Info("terminal closed", "sandbox", sb.Name, "user", c.Name)
@@ -113,7 +116,8 @@ func (s *Server) terminal(w http.ResponseWriter, r *http.Request, c sandbox.Call
 
 func (s *Server) shellFor(sb *sandbox.Sandbox) []string {
 	if t, ok := s.mgr.Policy().Template(sb.Template); ok && t.Shell != "" && sb.Image == t.Image {
-		return []string{"/bin/sh", "-c", "export TERM=xterm-256color; exec " + t.Shell}
+		// Run the template shell itself: images such as Android have no /bin/sh.
+		return []string{t.Shell, "-c", "export TERM=xterm-256color; exec " + t.Shell}
 	}
 	return []string{"/bin/sh", "-c", defaultShell}
 }
@@ -191,6 +195,51 @@ func (s *Server) vmConsole(ctx context.Context, cancel context.CancelFunc, ws *w
 				out.status("console closed")
 			}
 			return
+		}
+		if _, err := out.Write(data); err != nil {
+			return
+		}
+	}
+}
+
+// macTerminal relays frames between the browser and the Mac agent, which
+// speaks the same terminal protocol over SSH into the guest.
+func (s *Server) macTerminal(ctx context.Context, cancel context.CancelFunc, ws *websocket.Conn, out *wsWriter, sb *sandbox.Sandbox) {
+	pool := s.mgr.MacOS()
+	if pool == nil {
+		out.status("macOS is not configured")
+		return
+	}
+	ac, err := pool.Terminal(ctx, sb.Host, sb.Name)
+	if err != nil {
+		out.status("could not reach the Mac host: " + err.Error())
+		return
+	}
+	defer ac.Close()
+	go func() {
+		defer cancel()
+		for {
+			mt, data, err := ws.ReadMessage()
+			if err != nil {
+				return
+			}
+			if err := ac.WriteMessage(mt, data); err != nil {
+				return
+			}
+		}
+	}()
+	go func() {
+		<-ctx.Done()
+		ac.Close()
+	}()
+	for {
+		mt, data, err := ac.ReadMessage()
+		if err != nil {
+			return
+		}
+		if mt == websocket.TextMessage {
+			out.status(string(data))
+			continue
 		}
 		if _, err := out.Write(data); err != nil {
 			return

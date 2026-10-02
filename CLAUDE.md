@@ -1,7 +1,8 @@
 # Vishwakarma
 
-Self-hosted throwaway VMs (KubeVirt) and containers on Kubernetes for testing
-apps and endpoint tools. One Go binary serves the REST API, the terminal
+Self-hosted throwaway containers, Android (redroid), Linux VMs (KubeVirt) and
+macOS VMs (Tart on Mac hosts, through `vishwakarma agent`) for testing apps and
+endpoint tools. One Go binary serves the REST API, the terminal
 WebSocket and the embedded console; Kubernetes is the only store. Apache 2.0.
 The Helm chart lives in github.com/dmdhrumilmistry/helm-charts (`vishwakarma/`).
 
@@ -24,6 +25,9 @@ and security model, docs/api.md for the API.
 - **Console**: vanilla ES modules, no framework, no bundler, no CDN. Build DOM
   with `h()` from `js/core.js`; untrusted text only via text nodes. Use
   `h()` rather than `Element.append` with possibly-null children.
+- **macOS**: the agent API (`internal/macos`) is a contract between server and
+  agent versions; add fields, do not rename. Never run macOS guests outside
+  Apple hardware; the simulator backend exists for testing on Linux.
 - Keep chart RBAC in sync with what the server calls (namespaced Role only).
 
 ## Testing

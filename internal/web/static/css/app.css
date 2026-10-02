@@ -150,7 +150,7 @@ input[type="checkbox"] { width: auto; accent-color: var(--accent); }
 .tag {
   display: inline-block; padding: .05rem .45rem; border-radius: 5px;
   background: var(--surface-2); color: var(--muted);
-  font-size: .75rem; font-weight: 600; text-transform: uppercase; letter-spacing: .04em;
+  font-size: .75rem; font-weight: 600; letter-spacing: .02em;
 }
 
 /* Sandbox list */
@@ -204,6 +204,7 @@ input[type="checkbox"] { width: auto; accent-color: var(--accent); }
 .ep-list { list-style: none; margin: 0; padding: 0; }
 .ep-list li { display: flex; align-items: center; justify-content: space-between; gap: .75rem; padding: .5rem 0; border-bottom: 1px solid var(--border); }
 .ep-list li:last-child { border-bottom: 0; }
+.ep-hint { display: block; margin-top: .2rem; font-size: .8rem; }
 .secret { font-family: var(--mono); letter-spacing: .02em; }
 
 /* Terminal */

@@ -18,6 +18,7 @@ import (
 	"github.com/dmdhrumilmistry/vishwakarma/internal/auth"
 	"github.com/dmdhrumilmistry/vishwakarma/internal/config"
 	"github.com/dmdhrumilmistry/vishwakarma/internal/kube"
+	"github.com/dmdhrumilmistry/vishwakarma/internal/macos"
 	"github.com/dmdhrumilmistry/vishwakarma/internal/sandbox"
 	"github.com/dmdhrumilmistry/vishwakarma/internal/web"
 )
@@ -33,6 +34,11 @@ func main() {
 	case "serve":
 		if err := serve(); err != nil {
 			fmt.Fprintln(os.Stderr, "vishwakarma:", err)
+			os.Exit(1)
+		}
+	case "agent":
+		if err := agent(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "vishwakarma agent:", err)
 			os.Exit(1)
 		}
 	case "check-config":
@@ -53,7 +59,7 @@ func main() {
 	case "version", "--version", "-v":
 		fmt.Println(version)
 	default:
-		fmt.Fprintf(os.Stderr, "usage: vishwakarma [serve|check-config [file]|version]\n")
+		fmt.Fprintf(os.Stderr, "usage: vishwakarma [serve|agent [flags]|check-config [file]|version]\n")
 		os.Exit(2)
 	}
 }
@@ -98,6 +104,10 @@ func serve() error {
 		blockAPIServer(clients, &cfg.Policy, log)
 	}
 	mgr := sandbox.NewManager(clients.Kube, clients.Dynamic, &cfg.Policy, clients.KubeVirtServed, log)
+	if pool := macos.NewPool(cfg.Policy.MacOS.Agents, cfg.MacOSToken); pool != nil {
+		mgr.SetMacOS(pool)
+		log.Info("macOS hosts configured", "agents", len(cfg.Policy.MacOS.Agents))
+	}
 	authn := auth.New(cfg.Auth)
 	srv := api.New(mgr, authn, clients, version, log)
 

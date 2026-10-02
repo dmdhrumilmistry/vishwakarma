@@ -100,6 +100,16 @@ function loginView() {
   pw.focus();
 }
 
+const KIND_LABEL = { container: 'Container', vm: 'VM', macos: 'macOS' };
+
+function kindTags(s) {
+  const android = s.kind === 'container' && (s.template || '').startsWith('android');
+  return [
+    h('span', { class: 'tag' }, android ? 'Android' : (KIND_LABEL[s.kind] || s.kind)),
+    s.simulated ? h('span', { class: 'tag', title: 'From the agent simulator: there is no real macOS guest' }, 'Simulated') : null,
+  ];
+}
+
 // ---------------------------------------------------------------- list
 
 function listView() {
@@ -152,7 +162,7 @@ function table(items) {
       h('tbody', {}, items.map((s) => h('tr', { onclick: () => go(`#/s/${s.name}`) },
         h('td', {},
           h('a', { class: 'sb-name', href: `#/s/${s.name}` }, s.name), ' ',
-          h('span', { class: 'tag' }, s.kind === 'vm' ? 'VM' : 'Container')),
+          kindTags(s)),
         h('td', {}, chip(s.status)),
         h('td', { class: 'hide-sm' }, h('span', { class: 'sb-image' }, s.image)),
         admin ? h('td', { class: 'hide-sm' }, s.owner) : null,
@@ -220,14 +230,18 @@ function newView() {
     if (diskOn.checked) disk.focus();
   });
 
-  const kinds = [['container', 'Container'], ['vm', 'Virtual machine']];
+  const kinds = [['container', 'Container'], ['vm', 'Virtual machine'], ['macos', 'macOS']];
+  const unavailable = {
+    vm: i.vms ? null : 'KubeVirt is not installed on this cluster',
+    macos: i.macos ? null : 'No Mac host agent is configured or reachable',
+  };
   const renderKinds = () => {
     clear(kindSeg);
     for (const [k, text] of kinds) {
-      const disabled = k === 'vm' && !i.vms;
+      const disabled = Boolean(unavailable[k]);
       kindSeg.appendChild(h('button', {
         type: 'button', 'aria-pressed': String(form.kind === k), disabled,
-        title: disabled ? 'KubeVirt is not installed on this cluster' : null,
+        title: unavailable[k],
         onclick: () => { form.kind = k; form.template = null; form.custom = false; renderKinds(); renderTemplates(); },
       }, text));
     }
@@ -259,25 +273,34 @@ function newView() {
       tplGrid.appendChild(h('button', {
         type: 'button', class: 'tpl', 'aria-pressed': String(form.custom), onclick: () => pick(null, true),
       },
-      h('strong', {}, form.kind === 'vm' ? 'Custom disk image' : 'Custom image'),
-      h('span', { class: 'desc' }, form.kind === 'vm'
-        ? 'Any KubeVirt containerDisk image'
-        : 'Your own app image, with ports and environment')));
+      h('strong', {}, form.kind === 'container' ? 'Custom image' : 'Custom disk image'),
+      h('span', { class: 'desc' }, {
+        vm: 'Any KubeVirt containerDisk image',
+        macos: 'Any Tart macOS image (an OCI reference)',
+      }[form.kind] || 'Your own app image, with ports and environment')));
     }
     customBox.hidden = !form.custom;
-    command.closest('.field').hidden = form.kind === 'vm';
-    vmBox.hidden = form.kind !== 'vm';
+    command.closest('.field').hidden = form.kind !== 'container';
+    vmBox.hidden = form.kind === 'container';
+    vmNote.textContent = form.kind === 'macos'
+      ? 'Runs on a Mac host. The terminal is an SSH session; the screen is reachable over VNC. The first pull of a macOS image can take a long time.'
+      : 'The VM disk resets when the VM stops. Use the terminal for the serial console, or SSH through an exposed port.';
+    exposeField.hidden = form.kind === 'macos';
     containerBox.hidden = form.kind !== 'container';
     const r = (form.template && form.template.resources) || {};
     cpu.placeholder = r.cpu || p.defaults.cpu;
     memory.placeholder = r.memory || p.defaults.memory;
-    ports.placeholder = form.kind === 'vm' ? '22 (default)' : 'e.g. 80, 443, 8080';
+    ports.placeholder = { vm: '22 (default)', macos: 'SSH and VNC are always forwarded' }[form.kind] || 'e.g. 80, 443, 8080';
   };
 
   name.addEventListener('input', () => { name.dataset.touched = '1'; });
 
+  const vmNote = h('p', { class: 'muted small' });
   const field = (id, text, input, hint) => h('label', { class: 'field', for: id },
     h('span', {}, text), input, hint ? h('span', { class: 'hint' }, hint) : null);
+
+  const exposeField = field('f-expose', 'Reachable from', expose,
+    p.allowNodePort ? 'NodePort opens a high port on every node of the cluster.' : null);
 
   const parsePorts = () => {
     const raw = ports.value.trim();
@@ -316,9 +339,9 @@ function newView() {
         disk: form.kind === 'container' && diskOn.checked ? (disk.value.trim() || p.defaults.disk) : undefined,
         ttl: ttlSel.value,
         ports: parsePorts(),
-        expose: expose.value,
         env: form.kind === 'container' ? parseEnv() : undefined,
-        sshKey: form.kind === 'vm' && sshKey.value.trim() ? sshKey.value.trim() : undefined,
+        expose: form.kind === 'macos' ? undefined : expose.value,
+        sshKey: form.kind !== 'container' && sshKey.value.trim() ? sshKey.value.trim() : undefined,
         privileged: form.kind === 'container' && privileged.checked ? true : undefined,
       };
       if (form.custom && !spec.image) throw new Error('Enter an image for the custom sandbox.');
@@ -368,8 +391,7 @@ function newView() {
         h('h2', {}, 'Network'),
         h('div', { class: 'grid-2' },
           field('f-ports', 'Ports to expose', ports, 'TCP ports, separated by commas.'),
-          field('f-expose', 'Reachable from', expose,
-            p.allowNodePort ? 'NodePort opens a high port on every node of the cluster.' : null)),
+          exposeField),
         p.isolated ? h('p', { class: 'muted small' }, 'Sandboxes are isolated: they accept traffic only on these ports and cannot reach other workloads in the cluster.') : null),
       errBox,
       h('div', { class: 'form-actions' }, h('a', { class: 'btn', href: '#/' }, 'Cancel'), submit)));
@@ -389,7 +411,7 @@ function newView() {
       h('span', {}, 'Privileged', h('br'), h('span', { class: 'muted small' }, 'Full access to the node kernel. Needed by some endpoint agents; never use with untrusted images.'))) : null));
   vmBox.append(
     field('f-ssh', 'SSH public key (optional)', sshKey, 'Added for the login user. A password is generated either way.'),
-    h('p', { class: 'muted small' }, 'The VM disk resets when the VM stops. Use the terminal for the serial console, or SSH through an exposed port.'));
+    vmNote);
 
   renderKinds();
   renderTemplates();
@@ -415,7 +437,7 @@ function detailView(name, tab) {
       ttlChoices(state.info.policy).opts.map((d) => h('option', { value: d }, label(d))));
     clear(head).append(
       h('div', {},
-        h('div', { class: 'row' }, h('h1', {}, s.name), chip(s.status), h('span', { class: 'tag' }, s.kind === 'vm' ? 'VM' : 'Container')),
+        h('div', { class: 'row' }, h('h1', {}, s.name), chip(s.status), kindTags(s)),
         h('p', { class: 'muted sub small' },
           s.message ? `${s.message}. ` : '',
           `Deletes itself in ${until(s.expiresAt)}.`)),
@@ -506,7 +528,10 @@ function overviewTab(body, s) {
   const kv = (k, v) => [h('dt', {}, k), h('dd', {}, v === undefined || v === '' ? '-' : v)];
   const eps = s.endpoints.length
     ? h('ul', { class: 'ep-list' }, s.endpoints.map((e) => h('li', {},
-      h('span', {}, h('strong', {}, `${e.port}/${e.protocol.toLowerCase()}`), ' ', h('code', {}, e.address)),
+      h('span', {},
+        h('strong', {}, e.name ? `${e.name.toUpperCase()} (${e.port})` : `${e.port}/${e.protocol.toLowerCase()}`), ' ',
+        h('code', {}, e.address),
+        endpointHint(s, e)),
       h('button', { class: 'btn btn-sm', type: 'button', onclick: () => copy(e.address) }, 'Copy'))))
     : h('p', { class: 'muted small' }, 'No ports exposed.');
 
@@ -522,44 +547,67 @@ function overviewTab(body, s) {
       kv('Memory', s.memory),
       s.kind === 'container' ? kv('Volume', s.disk ? `${s.disk} at /data` : 'none') : null,
       s.privileged ? kv('Privileged', 'yes') : null,
-      kv('Node', s.node),
-      kv('Sandbox IP', s.ip)));
+      kv(s.kind === 'macos' ? 'Mac host' : 'Node', s.node),
+      kv(s.kind === 'container' ? 'Sandbox IP' : 'Guest IP', s.ip)));
 
   const right = h('div', { class: 'stack' },
     h('section', { class: 'panel' }, h('h2', {}, 'Endpoints'), eps),
-    s.kind === 'vm' ? credentials(s) : null);
+    s.kind !== 'container' ? credentials(s) : null);
 
   clear(body).appendChild(h('div', { class: 'grid-2' }, left, right));
 }
 
+// endpointHint suggests the client command for well-known ports.
+function endpointHint(s, e) {
+  let cmd = null;
+  if (e.port === 5555 && s.template && s.template.startsWith('android')) cmd = `adb connect ${e.address}`;
+  if (e.name === 'vnc') cmd = `open vnc://${e.address}`;
+  if (!cmd) return null;
+  return h('span', { class: 'ep-hint' }, h('code', {}, cmd),
+    e.nodePort || s.kind === 'macos' ? null : h('span', { class: 'muted' }, ' (expose with NodePort to reach it from outside)'));
+}
+
+// Revealed logins survive the overview's periodic re-render.
+const revealed = new Map();
+
 function credentials(s) {
   const pass = h('span', { class: 'secret' }, '****************');
-  let shown = null;
+  let shown = revealed.get(s.name) || null;
   const reveal = h('button', {
     class: 'btn btn-sm', type: 'button',
     onclick: async () => {
       if (!shown) {
         try { shown = await api('GET', `/sandboxes/${s.name}/credentials`); } catch (e) { toast(e.message, true); return; }
+        revealed.set(s.name, shown);
       }
       pass.textContent = shown.password || '(set by the template)';
+      vncPass.textContent = shown.vncPassword || '(none)';
       reveal.hidden = true;
       copyBtn.hidden = !shown.password;
     },
   }, 'Show');
   const copyBtn = h('button', { class: 'btn btn-sm', type: 'button', hidden: true, onclick: () => copy(shown.password) }, 'Copy');
-  const ssh = s.endpoints.find((e) => e.port === 22);
+  const ssh = s.endpoints.find((e) => e.name === 'ssh') || s.endpoints.find((e) => e.port === 22);
+  const vncPass = h('span', { class: 'secret' }, '********');
+  const vncRow = s.kind === 'macos' ? [h('dt', {}, 'VNC password'), h('dd', {}, vncPass)] : null;
   let hint = null;
   if (ssh && ssh.nodePort) {
     const host = ssh.address.split(':')[0];
     hint = h('p', { class: 'small' }, 'SSH: ', h('code', {}, `ssh ${s.user}@${host} -p ${ssh.nodePort}`));
+  } else if (s.kind === 'macos') {
+    hint = h('p', { class: 'muted small' }, 'Endpoints appear once the VM is running.');
   }
+  if (shown) reveal.click(); // already revealed before this re-render
   return h('section', { class: 'panel' },
     h('h2', {}, 'Login'),
     h('dl', { class: 'kv' },
       h('dt', {}, 'User'), h('dd', {}, h('code', {}, s.user || '-')),
-      h('dt', {}, 'Password'), h('dd', { class: 'row' }, pass, reveal, copyBtn)),
+      h('dt', {}, 'Password'), h('dd', { class: 'row' }, pass, reveal, copyBtn),
+      vncRow),
     hint,
-    h('p', { class: 'muted small' }, 'Cloud-init sets the login on first boot, which can take a few minutes.'));
+    h('p', { class: 'muted small' }, s.kind === 'macos'
+      ? 'The image password is replaced with this one on first boot.'
+      : 'Cloud-init sets the login on first boot, which can take a few minutes.'));
 }
 
 function terminalTab(body, s) {
@@ -576,7 +624,8 @@ function terminalTab(body, s) {
   clear(body).append(
     h('div', { class: 'term-bar' }, status, reconnect),
     h('div', { class: 'term-wrap' }, host),
-    s.kind === 'vm' ? h('p', { class: 'muted small' }, 'This is the serial console. Log in with the user and password from the Overview tab.') : null);
+    s.kind === 'vm' ? h('p', { class: 'muted small' }, 'This is the serial console. Log in with the user and password from the Overview tab.') : null,
+    s.kind === 'macos' ? h('p', { class: 'muted small' }, `An SSH session into the VM as ${s.user}.`) : null);
   if (s.status === 'Running') {
     connect();
   } else {
