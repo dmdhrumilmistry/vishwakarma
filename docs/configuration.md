@@ -55,6 +55,9 @@ maxSandboxesPerUser: 5          # admins are exempt; 0 for unlimited
 allowCustomImages: true
 allowPrivileged: false
 allowPrivilegedTemplates: false # privileged only from templates marked so (Android)
+macosOnLinux: false             # offer the Docker-OSX template (needs /dev/kvm; see macos.md)
+androidScreenImage: ""          # Android screen sidecar; default is the release's image
+androidPlayStoreImage: ""       # your Play Store build; adds "Android 12 with Play Store"
 allowNodePort: true
 storageClass: ""                # for /data volumes; empty = cluster default
 defaults: {cpu: "1", memory: 1Gi, disk: 10Gi}
@@ -105,6 +108,12 @@ templates:
     ports: [8080]
     env: {MODE: test}
     privileged: false             # needs allowPrivileged or allowPrivilegedTemplates
+    screen:                       # a Screen tab (VNC) for this container
+      port: 5900
+      sidecar: android            # or empty when the image serves VNC itself
+    extraResources:               # added to requests and limits
+      devices.kubevirt.io/kvm: "1"  # /dev/kvm through KubeVirt's device plugin
+    macosOnLinux: false           # true needs the policy switch of the same name
     resources: {cpu: "2", memory: 2Gi, disk: 20Gi}
 
   - name: ubuntu-24.04-vm

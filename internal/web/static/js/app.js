@@ -103,9 +103,12 @@ function loginView() {
 const KIND_LABEL = { container: 'Container', vm: 'VM', macos: 'macOS' };
 
 function kindTags(s) {
-  const android = s.kind === 'container' && (s.template || '').startsWith('android');
+  const tpl = s.kind === 'container' ? (s.template || '') : '';
+  const label = tpl.startsWith('android') ? 'Android'
+    : tpl === 'macos-linux' ? 'macOS on Linux'
+      : (KIND_LABEL[s.kind] || s.kind);
   return [
-    h('span', { class: 'tag' }, android ? 'Android' : (KIND_LABEL[s.kind] || s.kind)),
+    h('span', { class: 'tag' }, label),
     s.simulated ? h('span', { class: 'tag', title: 'From the agent simulator: there is no real macOS guest' }, 'Simulated') : null,
   ];
 }
@@ -439,7 +442,7 @@ function detailView(name, tab) {
       h('div', {},
         h('div', { class: 'row' }, h('h1', {}, s.name), chip(s.status), kindTags(s)),
         h('p', { class: 'muted sub small' },
-          s.message ? `${s.message}. ` : '',
+          friendly(s.message),
           `Deletes itself in ${until(s.expiresAt)}.`)),
       h('div', { class: 'row' },
         stopped
@@ -451,7 +454,9 @@ function detailView(name, tab) {
   };
 
   const renderTabs = (s) => {
-    const list = [['overview', 'Overview'], ['terminal', s.kind === 'vm' ? 'Console' : 'Terminal']];
+    const list = [['overview', 'Overview']];
+    if (s.screen) list.push(['screen', 'Screen']);
+    list.push(['terminal', s.kind === 'vm' ? 'Console' : 'Terminal']);
     if (s.kind === 'container') list.push(['logs', 'Logs']);
     clear(tabs);
     for (const [k, text] of list) {
@@ -515,6 +520,7 @@ function detailView(name, tab) {
 
   const renderBody = (s) => {
     if (tab === 'terminal') return terminalTab(body, s);
+    if (tab === 'screen' && s.screen) return screenTab(body, s);
     if (tab === 'logs' && s.kind === 'container') return logsTab(body, s);
     return overviewTab(body, s);
   };
@@ -552,7 +558,7 @@ function overviewTab(body, s) {
 
   const right = h('div', { class: 'stack' },
     h('section', { class: 'panel' }, h('h2', {}, 'Endpoints'), eps),
-    s.kind !== 'container' ? credentials(s) : null);
+    s.kind !== 'container' || templateLogin(s) ? credentials(s) : null);
 
   clear(body).appendChild(h('div', { class: 'grid-2' }, left, right));
 }
@@ -565,6 +571,24 @@ function endpointHint(s, e) {
   if (!cmd) return null;
   return h('span', { class: 'ep-hint' }, h('code', {}, cmd),
     e.nodePort || s.kind === 'macos' ? null : h('span', { class: 'muted' }, ' (expose with NodePort to reach it from outside)'));
+}
+
+// friendly explains scheduler messages people hit often.
+function friendly(msg) {
+  if (!msg) return '';
+  if (msg.includes('devices.kubevirt.io/kvm')) {
+    return 'Waiting for a node with /dev/kvm (hardware virtualization). No node has it free right now. ';
+  }
+  if (msg.includes('Insufficient memory') || msg.includes('Insufficient cpu')) {
+    return 'Waiting for a node with enough free memory or CPU. ';
+  }
+  return `${msg}. `;
+}
+
+// templateLogin reports whether a container's image ships a fixed login.
+function templateLogin(s) {
+  const t = state.info.templates.find((x) => x.name === s.template);
+  return Boolean(t && t.user && t.image === s.image);
 }
 
 // Revealed logins survive the overview's periodic re-render.
@@ -601,13 +625,14 @@ function credentials(s) {
   return h('section', { class: 'panel' },
     h('h2', {}, 'Login'),
     h('dl', { class: 'kv' },
-      h('dt', {}, 'User'), h('dd', {}, h('code', {}, s.user || '-')),
+      h('dt', {}, 'User'), h('dd', {}, h('code', {}, s.user || (state.info.templates.find((x) => x.name === s.template) || {}).user || '-')),
       h('dt', {}, 'Password'), h('dd', { class: 'row' }, pass, reveal, copyBtn),
       vncRow),
     hint,
-    h('p', { class: 'muted small' }, s.kind === 'macos'
-      ? 'The image password is replaced with this one on first boot.'
-      : 'Cloud-init sets the login on first boot, which can take a few minutes.'));
+    h('p', { class: 'muted small' }, {
+      macos: 'The image password is replaced with this one on first boot.',
+      container: 'This login is built into the image.',
+    }[s.kind] || 'Cloud-init sets the login on first boot, which can take a few minutes.'));
 }
 
 function terminalTab(body, s) {
@@ -632,6 +657,61 @@ function terminalTab(body, s) {
     status.textContent = `The sandbox is ${s.status.toLowerCase()}. Start it, then reconnect.`;
   }
   state.teardown.push(() => { if (close) close(); });
+}
+
+function screenTab(body, s) {
+  const status = h('span', { class: 'term-status' });
+  const clip = h('textarea', {
+    class: 'clip', rows: 2, spellcheck: 'false', 'aria-label': 'Clipboard',
+    placeholder: 'Text copied on the device shows up here. Type or paste here, then Paste into device.',
+  });
+  const host = h('div', { class: 'screen' });
+  const wrap = h('div', { class: 'screen-wrap' }, host);
+  let session = null;
+  const password = async () => {
+    const c = revealed.get(s.name) || await api('GET', `/sandboxes/${s.name}/credentials`);
+    revealed.set(s.name, c);
+    return c.vncPassword || '';
+  };
+  const connect = async () => {
+    if (session) session.close();
+    clear(host);
+    const { openScreen } = await import('./screen.js');
+    session = openScreen(host, s.name, (t) => { status.textContent = t; }, password, (text) => {
+      clip.value = text;
+      toast('Copied on the device: it is in the clipboard box below');
+    }, { android });
+  };
+  const android = (s.template || '').startsWith('android');
+  const btn = (text, title, fn) => h('button', { class: 'btn btn-sm', type: 'button', title, onclick: () => session && fn() }, text);
+  const keys = android
+    ? [btn('Back', 'Android back (Alt+B)', () => session.altKey('b')),
+      btn('Home', 'Android home (Alt+H)', () => session.altKey('h')),
+      btn('Recents', 'Recent apps (Alt+S)', () => session.altKey('s'))]
+    : [btn('Ctrl+Alt+Del', 'Send Ctrl+Alt+Del', () => session.ctrlAltDel())];
+  clear(body).append(
+    h('div', { class: 'term-bar' }, status,
+      h('div', { class: 'row' }, keys,
+        h('button', { class: 'btn btn-sm', type: 'button', onclick: () => wrap.requestFullscreen && wrap.requestFullscreen() }, 'Full screen'),
+        h('button', { class: 'btn btn-sm', type: 'button', onclick: connect }, 'Reconnect'))),
+    wrap,
+    h('div', { class: 'clip-bar' },
+      clip,
+      h('div', { class: 'row' },
+        h('button', { class: 'btn btn-sm', type: 'button', onclick: () => session && clip.value && session.paste(clip.value) }, 'Paste into device'),
+        h('button', { class: 'btn btn-sm', type: 'button', onclick: () => clip.value && copy(clip.value) }, 'Copy'))),
+    h('p', { class: 'muted small' }, 'Ctrl+V in the screen pastes your clipboard into the device. Text you copy on the device appears in the box above.'),
+    h('p', { class: 'muted small' }, android
+      ? 'Click and type to use the device. The screen appears once Android has booted, about a minute after start.'
+      : s.kind === 'vm'
+        ? 'The VM display. Text-only guests show their console here too.'
+        : 'The display of the sandbox, over VNC.'));
+  if (s.status === 'Running') {
+    connect();
+  } else {
+    status.textContent = `The sandbox is ${s.status.toLowerCase()}. Start it, then reconnect.`;
+  }
+  state.teardown.push(() => { if (session) session.close(); });
 }
 
 function logsTab(body, s) {

@@ -1,0 +1,41 @@
+#!/bin/sh
+# Builds a redroid image with Google Play (Play Store, Play services) from
+# MindTheGapps, for the "Android 12 with Play Store" template.
+#
+# Google's apps cannot be redistributed, so Vishwakarma does not publish this
+# image: build it yourself, then push it to your own private registry or
+# import it on your nodes, and set sandboxes.androidPlayStoreImage.
+#
+#   ./build.sh                                  # builds vishwakarma/redroid-playstore:12
+#   IMAGE=registry.lan/redroid-playstore:12 ./build.sh && docker push registry.lan/redroid-playstore:12
+#   docker save vishwakarma/redroid-playstore:12 | ssh node 'sudo k3s ctr -n k8s.io images import -'
+set -eu
+
+IMAGE="${IMAGE:-vishwakarma/redroid-playstore:12}"
+BASE="${BASE:-redroid/redroid:12.0.0_64only-latest}"
+# https://github.com/MindTheGapps/12.1.0-x86_64/releases
+GAPPS_URL="${GAPPS_URL:-https://github.com/MindTheGapps/12.1.0-x86_64/releases/download/MindTheGapps-12.1.0-x86_64-20231025_201056/MindTheGapps-12.1.0-x86_64-20231025_201056.zip}"
+GAPPS_SHA256="${GAPPS_SHA256:-bc3d06d2f497189fcc6c9aa62c801572195b98d6c24085505dfa279fbeebcf6e}"
+
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+
+echo "downloading MindTheGapps"
+curl -fsSL -o "$work/gapps.zip" "$GAPPS_URL"
+echo "$GAPPS_SHA256  $work/gapps.zip" | sha256sum -c -
+
+mkdir -p "$work/ctx"
+# Google's SetupWizard needs Wi-Fi permissions redroid does not have; it
+# crash-loops and hides the launcher. Leave it out; AOSP's own provisioning
+# then finishes setup, as on the plain redroid image.
+(cd "$work/ctx" && unzip -q "$work/gapps.zip" && rm -rf META-INF build.prop system/addon.d system/system_ext/priv-app/SetupWizard)
+
+cat > "$work/ctx/Dockerfile" <<EOF
+FROM $BASE
+# The Google apps go on the system partition, as a recovery flash would put them.
+COPY system/ /system/
+EOF
+
+docker build -t "$IMAGE" "$work/ctx"
+echo "built $IMAGE"
+echo "Set sandboxes.androidPlayStoreImage=$IMAGE and make it pullable by your nodes."

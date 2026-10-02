@@ -134,6 +134,32 @@ forwarded ports.
   them again from its state file (the VNC port is lost until the VM is
   restarted).
 
+## macOS on Linux (Docker-OSX)
+
+For Linux clusters there is also a **real** macOS option: the
+`macos-linux` template runs [Docker-OSX](https://github.com/sickcodes/Docker-OSX)
+(macOS under QEMU with OpenCore) as a container. It boots the prebuilt
+`sickcodes/docker-osx:auto` image (macOS Catalina, login `user` /
+`alpine`), forwards SSH on port 10022 and shows the desktop in the Screen
+tab.
+
+Two things to know first:
+
+- **It needs hardware virtualization** (`/dev/kvm`) on the node. The
+  container requests `devices.kubevirt.io/kvm: 1`, which KubeVirt's device
+  plugin provides on nodes with `/dev/kvm`; without it the sandbox stays
+  Pending with "Insufficient devices.kubevirt.io/kvm". Under software
+  emulation macOS is too slow to be usable, so there is no fallback. On a
+  VMware or Hyper-V node VM, enable nested virtualization (VMware:
+  "Virtualize Intel VT-x/EPT"; note VMware cannot do this while Windows
+  runs Hyper-V, for example for WSL2 or Docker Desktop).
+- **Apple's license only permits macOS on Apple hardware.** Running it on
+  other hardware breaks the macOS license. The template is off until you
+  set `sandboxes.macosOnLinux: true`; that decision is yours.
+
+The image is large (about 15 GB) and needs about 8 GiB of memory per
+sandbox.
+
 ## Trying it without a Mac: the simulator
 
 For a Linux cluster (development, CI, a lab) the chart can run an agent in

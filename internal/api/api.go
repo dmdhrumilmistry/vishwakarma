@@ -59,6 +59,7 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/sandboxes/{name}/credentials", s.authed(s.credentials))
 	mux.HandleFunc("GET /api/v1/sandboxes/{name}/logs", s.authed(s.logs))
 	mux.HandleFunc("GET /api/v1/sandboxes/{name}/terminal", s.authed(s.terminal))
+	mux.HandleFunc("GET /api/v1/sandboxes/{name}/vnc", s.authed(s.vnc))
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "no such endpoint")
 	})
@@ -122,6 +123,9 @@ type templateView struct {
 	Privileged  bool             `json:"privileged,omitempty"`
 	Ports       []int32          `json:"ports,omitempty"`
 	Resources   config.Resources `json:"resources"`
+	Screen      bool             `json:"screen,omitempty"`
+	// Requires lists node features the template needs, e.g. "kvm".
+	Requires []string `json:"requires,omitempty"`
 }
 
 func (s *Server) info(w http.ResponseWriter, r *http.Request, c sandbox.Caller) {
@@ -137,6 +141,9 @@ func (s *Server) info(w http.ResponseWriter, r *http.Request, c sandbox.Caller) 
 		if t.Privileged && !p.AllowPrivileged && !p.AllowPrivilegedTemplates {
 			continue
 		}
+		if t.MacOSOnLinux && !p.MacOSOnLinux {
+			continue
+		}
 		name := t.DisplayName
 		if name == "" {
 			name = t.Name
@@ -144,6 +151,7 @@ func (s *Server) info(w http.ResponseWriter, r *http.Request, c sandbox.Caller) 
 		tpls = append(tpls, templateView{
 			Name: t.Name, DisplayName: name, Description: t.Description, Kind: t.Kind, Image: t.Image,
 			User: t.User, Privileged: t.Privileged, Ports: t.Ports, Resources: t.Resources,
+			Screen: t.Screen != nil, Requires: requires(t),
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -168,6 +176,17 @@ func (s *Server) info(w http.ResponseWriter, r *http.Request, c sandbox.Caller) 
 			"isolated":            p.Network.Isolate,
 		},
 	})
+}
+
+func requires(t config.Template) []string {
+	var out []string
+	if _, ok := t.ExtraResources["devices.kubevirt.io/kvm"]; ok {
+		out = append(out, "kvm")
+	}
+	if t.Screen != nil && t.Screen.Sidecar == config.ScreenSidecarAndroid {
+		out = append(out, "binder")
+	}
+	return out
 }
 
 func (s *Server) list(w http.ResponseWriter, r *http.Request, c sandbox.Caller) {

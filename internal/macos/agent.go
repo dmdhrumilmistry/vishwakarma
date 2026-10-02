@@ -804,6 +804,7 @@ func (a *Agent) Handler() http.Handler {
 		writeJSON(w, 200, c)
 	}))
 	mux.HandleFunc("GET /v1/vms/{name}/terminal", a.authed(a.terminal))
+	mux.HandleFunc("GET /v1/vms/{name}/vnc", a.authed(a.vnc))
 	return mux
 }
 
@@ -890,6 +891,90 @@ func (a *Agent) terminal(w http.ResponseWriter, req *http.Request) {
 			return
 		}
 	}
+}
+
+// vnc relays raw RFB between a WebSocket (binary frames) and the VM's VNC
+// server, for the console's Screen tab.
+func (a *Agent) vnc(w http.ResponseWriter, req *http.Request) {
+	r, err := a.get(req.PathValue("name"))
+	if err != nil {
+		reply(w, 0, nil, err)
+		return
+	}
+	run := r.running()
+	if run == nil || run.VNC == "" {
+		writeError(w, http.StatusConflict, "the VM has no screen right now; start it (restart it if the agent restarted)")
+		return
+	}
+	conn, err := net.DialTimeout("tcp", run.VNC, 10*time.Second)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "VNC: "+err.Error())
+		return
+	}
+	defer conn.Close()
+	ws, err := agentUpgrader.Upgrade(w, req, nil)
+	if err != nil {
+		return
+	}
+	defer ws.Close()
+	BridgeTCP(ws, conn)
+}
+
+// BridgeTCP copies binary WebSocket frames to conn and back until either
+// side closes.
+func BridgeTCP(ws *websocket.Conn, conn net.Conn) {
+	done := make(chan struct{}, 2)
+	go func() {
+		defer func() { done <- struct{}{} }()
+		for {
+			mt, data, err := ws.ReadMessage()
+			if err != nil {
+				return
+			}
+			if mt != websocket.BinaryMessage {
+				continue
+			}
+			if _, err := conn.Write(data); err != nil {
+				return
+			}
+		}
+	}()
+	go func() {
+		defer func() { done <- struct{}{} }()
+		buf := make([]byte, 64<<10)
+		for {
+			n, err := conn.Read(buf)
+			if n > 0 {
+				if werr := ws.WriteMessage(websocket.BinaryMessage, buf[:n]); werr != nil {
+					return
+				}
+			}
+			if err != nil {
+				return
+			}
+		}
+	}()
+	<-done
+}
+
+// BridgeWS copies frames between two WebSockets until either side closes.
+func BridgeWS(a, b *websocket.Conn) {
+	done := make(chan struct{}, 2)
+	pipe := func(src, dst *websocket.Conn) {
+		defer func() { done <- struct{}{} }()
+		for {
+			mt, data, err := src.ReadMessage()
+			if err != nil {
+				return
+			}
+			if err := dst.WriteMessage(mt, data); err != nil {
+				return
+			}
+		}
+	}
+	go pipe(a, b)
+	go pipe(b, a)
+	<-done
 }
 
 func reply(w http.ResponseWriter, status int, v any, err error) {

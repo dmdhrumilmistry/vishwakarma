@@ -59,6 +59,9 @@ workload is hostile.
 - **Least privilege for the server.** A namespaced Role in the sandbox
   namespace, plus `get` on the single `kubernetes` EndpointSlice in `default`.
   No ClusterRole.
+- **Screens** are never exposed directly: a sandbox screen port admits
+  traffic from the server namespace only, and the server relays it to the
+  signed-in owner's browser over `/vnc`.
 - **Privileged templates** (`allowPrivilegedTemplates`) allow privileged
   containers only from operator-defined templates with their own image and
   command, for Android. Users cannot run their own image privileged that

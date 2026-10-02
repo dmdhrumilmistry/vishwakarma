@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math/big"
+	"net"
 	"regexp"
 	"sort"
 	"strings"
@@ -152,6 +153,19 @@ func (m *Manager) resolve(ctx context.Context, s Spec, caller Caller) (*plan, er
 	}
 	p.Shell = tpl.Shell
 	p.CloudInit = tpl.CloudInit
+	if tpl.MacOSOnLinux && !pol.MacOSOnLinux {
+		return nil, invalid("template %q runs macOS on non-Apple hardware, which the administrator has not enabled", tpl.Name)
+	}
+	// A template's screen and devices belong to its own image.
+	if !custom || s.Image == "" || s.Image == tpl.Image {
+		p.Screen = tpl.Screen
+		if len(tpl.ExtraResources) > 0 {
+			p.Extra = map[string]resource.Quantity{}
+			for k, v := range tpl.ExtraResources {
+				p.Extra[k] = resource.MustParse(v)
+			}
+		}
+	}
 
 	env := map[string]string{}
 	for k, v := range tpl.Env {
@@ -683,7 +697,11 @@ func (m *Manager) Credentials(ctx context.Context, name string, caller Caller) (
 		}
 		return &Credentials{User: c.User, Password: c.Password, VNCPassword: c.VNCPassword}, nil
 	}
-	if s.Kind != config.KindVM {
+	if s.Kind == config.KindContainer {
+		// Some images ship a fixed login (Docker-OSX); show the template's.
+		if t, ok := m.policy.Template(s.Template); ok && t.User != "" && t.Image == s.Image {
+			return &Credentials{User: t.User, Password: t.Password}, nil
+		}
 		return nil, invalid("containers have no login; use the terminal")
 	}
 	sec, err := m.kube.CoreV1().Secrets(m.policy.Namespace).Get(ctx, name, metav1.GetOptions{})
@@ -694,6 +712,26 @@ func (m *Manager) Credentials(ctx context.Context, name string, caller Caller) (
 		return nil, err
 	}
 	return &Credentials{User: string(sec.Data["user"]), Password: string(sec.Data["password"])}, nil
+}
+
+// ScreenAddr is the VNC address of a container sandbox with a screen.
+func (m *Manager) ScreenAddr(ctx context.Context, s *Sandbox) (string, error) {
+	if !s.Screen || s.Kind != config.KindContainer {
+		return "", invalid("this sandbox has no screen")
+	}
+	pod, err := m.RunningPod(ctx, s)
+	if err != nil {
+		return "", err
+	}
+	d, err := m.kube.AppsV1().Deployments(m.policy.Namespace).Get(ctx, s.Name, metav1.GetOptions{})
+	if err != nil {
+		return "", err
+	}
+	port := d.Annotations[AnnScreenPort]
+	if pod.Status.PodIP == "" || port == "" {
+		return "", invalid("the sandbox has no screen address yet")
+	}
+	return net.JoinHostPort(pod.Status.PodIP, port), nil
 }
 
 // RunningPod returns the pod to open a terminal or read logs in.
@@ -762,6 +800,7 @@ func fromDeployment(d *appsv1.Deployment, pods []corev1.Pod) Sandbox {
 		}
 	}
 	s.Disk = d.Annotations[AnnDisk]
+	s.Screen = d.Annotations[AnnScreenPort] != ""
 
 	switch {
 	case d.DeletionTimestamp != nil:
@@ -834,6 +873,7 @@ func fromVM(vm, vmi *unstructured.Unstructured) Sandbox {
 		cores = 1
 	}
 	s.CPU = fmt.Sprint(cores)
+	s.Screen = true // KubeVirt serves a VNC display for every VM
 	s.Memory, _, _ = unstructured.NestedString(vm.Object, "spec", "template", "spec", "domain", "memory", "guest")
 
 	printable, _, _ := unstructured.NestedString(vm.Object, "status", "printableStatus")

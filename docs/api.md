@@ -28,6 +28,7 @@ removed.
 | `GET /sandboxes/{name}/credentials` | | `{"user", "password", "vncPassword"}` (VMs and macOS) |
 | `GET /sandboxes/{name}/logs?tail=500` | | text/plain, main container output (containers) |
 | `GET /sandboxes/{name}/terminal` | | WebSocket, see below |
+| `GET /sandboxes/{name}/vnc` | | WebSocket with raw RFB (VNC) in binary frames, for sandboxes with `"screen": true` |
 
 Health: `GET /healthz` (process up), `GET /readyz` (API server reachable and
 the sandbox namespace readable).

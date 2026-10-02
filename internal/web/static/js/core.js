@@ -130,13 +130,33 @@ export function parseDuration(s) {
   return ms;
 }
 
-export async function copy(text) {
-  try {
-    await navigator.clipboard.writeText(text);
-    toast('Copied');
-  } catch {
-    toast('Copy failed; select the text and copy it manually', true);
+// copyText writes text to the clipboard. The Clipboard API only exists in
+// secure contexts (HTTPS or localhost); on plain HTTP fall back to the old
+// execCommand path, which works inside a click or key handler.
+export async function copyText(text) {
+  if (navigator.clipboard && window.isSecureContext) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch { /* fall through */ }
   }
+  const active = document.activeElement;
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.setAttribute('readonly', '');
+  ta.className = 'offscreen';
+  document.body.appendChild(ta);
+  ta.select();
+  let ok = false;
+  try { ok = document.execCommand('copy'); } catch { ok = false; }
+  ta.remove();
+  if (active && active.focus) active.focus();
+  return ok;
+}
+
+export async function copy(text) {
+  if (await copyText(text)) toast('Copied');
+  else toast('Copy failed; select the text and copy it manually', true);
 }
 
 // splitArgs splits a command line on spaces, honoring single and double quotes.

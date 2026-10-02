@@ -123,6 +123,9 @@ func fromMacVM(vm macos.VM) Sandbox {
 		if f.Name == macos.ForwardSSH || f.Name == macos.ForwardVNC {
 			name = f.Name
 		}
+		if f.Name == macos.ForwardVNC {
+			s.Screen = true
+		}
 		s.Endpoints = append(s.Endpoints, Endpoint{
 			Name: name, Port: f.GuestPort, NodePort: f.HostPort, Protocol: "TCP",
 			Address: fmt.Sprintf("%s:%d", host, f.HostPort),

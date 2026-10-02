@@ -40,10 +40,14 @@ type plan struct {
 	Password   string
 	// KeepPassword keeps a macOS image's own password.
 	KeepPassword bool
-	SSHKey       string
-	CloudInit    string
-	Owner        string
-	ExpiresAt    time.Time
+	// Screen serves the display over VNC (containers).
+	Screen *config.Screen
+	// Extra are added to the container's requests and limits (e.g. /dev/kvm).
+	Extra     map[string]resource.Quantity
+	SSHKey    string
+	CloudInit string
+	Owner     string
+	ExpiresAt time.Time
 }
 
 func (p *plan) labels() map[string]string {
@@ -79,6 +83,9 @@ func (p *plan) annotations() map[string]string {
 	if p.Disk != nil {
 		a[AnnDisk] = p.Disk.String()
 	}
+	if p.Screen != nil {
+		a[AnnScreenPort] = strconv.Itoa(int(p.Screen.Port))
+	}
 	return a
 }
 
@@ -98,6 +105,12 @@ func buildDeployment(p *plan, pol *config.Policy) *appsv1.Deployment {
 	requests := corev1.ResourceList{
 		corev1.ResourceCPU:    fraction(p.CPU, 4, "10m"),
 		corev1.ResourceMemory: fraction(p.Memory, 2, "16Mi"),
+	}
+	// Device resources (devices.kubevirt.io/kvm) must have requests equal
+	// to limits.
+	for name, q := range p.Extra {
+		limits[corev1.ResourceName(name)] = q
+		requests[corev1.ResourceName(name)] = q
 	}
 
 	c := corev1.Container{
@@ -135,6 +148,9 @@ func buildDeployment(p *plan, pol *config.Policy) *appsv1.Deployment {
 		Tolerations:                   tolerations(pol.Tolerations),
 		ImagePullSecrets:              pullSecrets(pol.ImagePullSecrets),
 	}
+	if p.Screen != nil && p.Screen.Sidecar == config.ScreenSidecarAndroid {
+		spec.Containers = append(spec.Containers, androidScreen(p, pol))
+	}
 	if p.Disk != nil {
 		spec.Volumes = []corev1.Volume{{
 			Name: "data",
@@ -160,6 +176,32 @@ func buildDeployment(p *plan, pol *config.Policy) *appsv1.Deployment {
 	}
 	d.Annotations = p.annotations()
 	return d
+}
+
+// androidScreen is the sidecar that mirrors the Android display with scrcpy
+// into a virtual X display and serves it over VNC. It reaches adbd over the
+// pod's loopback, so it needs no privileges itself.
+func androidScreen(p *plan, pol *config.Policy) corev1.Container {
+	no := false
+	return corev1.Container{
+		Name:            ScreenContainerName,
+		Image:           pol.AndroidScreenImage,
+		ImagePullPolicy: corev1.PullIfNotPresent,
+		Env: []corev1.EnvVar{
+			{Name: "ADB_TARGET", Value: "127.0.0.1:5555"},
+			{Name: "VNC_PORT", Value: strconv.Itoa(int(p.Screen.Port))},
+		},
+		Ports: []corev1.ContainerPort{{Name: "vnc", ContainerPort: p.Screen.Port, Protocol: corev1.ProtocolTCP}},
+		Resources: corev1.ResourceRequirements{
+			Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("100m"), corev1.ResourceMemory: resource.MustParse("128Mi")},
+			Limits:   corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1"), corev1.ResourceMemory: resource.MustParse("512Mi")},
+		},
+		SecurityContext: &corev1.SecurityContext{
+			AllowPrivilegeEscalation: &no,
+			Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
+			SeccompProfile:           &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault},
+		},
+	}
 }
 
 // buildDataClaim renders the persistent /data volume of a container.
@@ -308,6 +350,20 @@ func buildNetworkPolicy(p *plan, pol *config.Policy) *netv1.NetworkPolicy {
 			PolicyTypes: []netv1.PolicyType{netv1.PolicyTypeIngress, netv1.PolicyTypeEgress},
 			Ingress:     []netv1.NetworkPolicyIngressRule{},
 		},
+	}
+	if p.Screen != nil {
+		// Only the Vishwakarma server reaches the screen port; users get it
+		// through the console.
+		pp := intstr.FromInt32(p.Screen.Port)
+		tcp := corev1.ProtocolTCP
+		from := metav1.LabelSelector{}
+		if pol.ServerNamespace != "" {
+			from.MatchLabels = map[string]string{"kubernetes.io/metadata.name": pol.ServerNamespace}
+		}
+		np.Spec.Ingress = append(np.Spec.Ingress, netv1.NetworkPolicyIngressRule{
+			Ports: []netv1.NetworkPolicyPort{{Protocol: &tcp, Port: &pp}},
+			From:  []netv1.NetworkPolicyPeer{{NamespaceSelector: &from}},
+		})
 	}
 	if len(p.Ports) > 0 {
 		rule := netv1.NetworkPolicyIngressRule{}

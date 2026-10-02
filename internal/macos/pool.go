@@ -247,11 +247,20 @@ func (p *Pool) Credentials(ctx context.Context, hostName, name string) (*Credent
 
 // Terminal opens the agent's terminal WebSocket for a VM.
 func (p *Pool) Terminal(ctx context.Context, hostName, name string) (*websocket.Conn, error) {
+	return p.stream(ctx, hostName, name, "terminal")
+}
+
+// VNC opens the agent's VNC relay for a VM.
+func (p *Pool) VNC(ctx context.Context, hostName, name string) (*websocket.Conn, error) {
+	return p.stream(ctx, hostName, name, "vnc")
+}
+
+func (p *Pool) stream(ctx context.Context, hostName, name, what string) (*websocket.Conn, error) {
 	h, err := p.host(hostName)
 	if err != nil {
 		return nil, err
 	}
-	u, err := url.Parse(h.base + "/v1/vms/" + url.PathEscape(name) + "/terminal")
+	u, err := url.Parse(h.base + "/v1/vms/" + url.PathEscape(name) + "/" + what)
 	if err != nil {
 		return nil, err
 	}

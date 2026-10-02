@@ -2,6 +2,7 @@
 // See internal/api/terminal.go for the protocol.
 import { Terminal } from '/vendor/xterm/xterm.mjs';
 import { FitAddon } from '/vendor/xterm/addon-fit.mjs';
+import { copyText } from './core.js';
 
 const theme = {
   background: '#0c0a09',
@@ -22,6 +23,25 @@ export function openTerminal(el, name, onStatus) {
   });
   const fit = new FitAddon();
   term.loadAddon(fit);
+  // Copy and paste like a desktop terminal:
+  //   Ctrl+C copies when text is selected and interrupts otherwise,
+  //   Ctrl+Shift+C copies, Ctrl+V and Ctrl+Shift+V paste (the browser's
+  //   own paste event, which works without the Clipboard API).
+  term.attachCustomKeyEventHandler((e) => {
+    if (e.type !== 'keydown') return true;
+    const mod = e.ctrlKey || e.metaKey;
+    const key = e.key.toLowerCase();
+    if (mod && key === 'c' && (e.shiftKey || term.hasSelection())) {
+      if (term.hasSelection()) {
+        copyText(term.getSelection());
+        term.clearSelection();
+      }
+      e.preventDefault();
+      return false;
+    }
+    if (mod && key === 'v') return false; // let the browser paste
+    return true;
+  });
   term.open(el);
   fit.fit();
 

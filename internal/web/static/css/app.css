@@ -207,6 +207,15 @@ input[type="checkbox"] { width: auto; accent-color: var(--accent); }
 .ep-hint { display: block; margin-top: .2rem; font-size: .8rem; }
 .secret { font-family: var(--mono); letter-spacing: .02em; }
 
+/* Screen (noVNC) */
+.screen-wrap { background: #0c0a09; border-radius: var(--radius); border: 1px solid var(--border); overflow: hidden; }
+.screen { height: min(75vh, 820px); }
+.screen-wrap:fullscreen .screen { height: 100vh; }
+.clip-bar { display: flex; gap: .5rem; align-items: flex-start; margin-top: .6rem; }
+.clip-bar .clip { flex: 1; min-height: 2.6rem; }
+.clip-bar .row { flex-direction: column; align-items: stretch; flex-wrap: nowrap; }
+.offscreen { position: fixed; left: -9999px; top: 0; opacity: 0; }
+
 /* Terminal */
 .term-wrap { background: #0c0a09; border-radius: var(--radius); padding: .6rem; border: 1px solid var(--border); }
 .term { height: min(68vh, 640px); }

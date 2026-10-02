@@ -30,6 +30,8 @@ const (
 	AnnShell      = "vishwakarma.io/shell"
 	AnnUser       = "vishwakarma.io/user"
 	AnnDisk       = "vishwakarma.io/disk"
+	// AnnScreenPort is the VNC port of a container with a screen.
+	AnnScreenPort = "vishwakarma.io/screen-port"
 )
 
 // Statuses reported for a sandbox.
@@ -51,6 +53,9 @@ const (
 
 // ContainerName is the name of the sandbox container in its pod.
 const ContainerName = "sandbox"
+
+// ScreenContainerName is the Android screen sidecar.
+const ScreenContainerName = "screen"
 
 // KubeVirt resources, used through the dynamic client so the server does not
 // depend on the KubeVirt Go module.
@@ -104,7 +109,9 @@ type Sandbox struct {
 	// Host is the Mac a macOS VM runs on.
 	Host string `json:"host,omitempty"`
 	// Simulated marks a macOS VM from the agent simulator (no real guest).
-	Simulated bool       `json:"simulated,omitempty"`
+	Simulated bool `json:"simulated,omitempty"`
+	// Screen is set when the console can show the sandbox display (VNC).
+	Screen    bool       `json:"screen,omitempty"`
 	Endpoints []Endpoint `json:"endpoints"`
 }
 

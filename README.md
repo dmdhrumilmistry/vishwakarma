@@ -15,12 +15,16 @@ Named after the divine architect and builder of Hindu tradition.
   need a real OS. Cloud-init sets up a login user, a generated password and
   your SSH key.
 - **Android** in a container ([redroid](https://github.com/remote-android/redroid-doc)):
-  Android 12 with `adb` and scrcpy access and a persistent `/data`.
+  Android 12 with its screen in the browser, copy and paste, `adb` access
+  and a persistent `/data`, plus an opt-in Google Play variant you build
+  yourself.
 - **macOS** on Mac hosts through [Tart](https://tart.run): each Mac runs
   `vishwakarma agent`; the server drives it. macOS Sequoia and Tahoe, and an
   Xcode image for the iOS Simulator, with an SSH terminal, VNC screen and
-  port forwarding. A simulator backend lets you try the flow on a Linux
-  cluster.
+  port forwarding. On Linux nodes with `/dev/kvm`, an opt-in Docker-OSX
+  template runs macOS under QEMU (not licensed by Apple on non-Apple
+  hardware).
+- **Screen in the browser** (noVNC) for Android, VMs and macOS.
 - **Browser terminal** (xterm.js): an exec shell for containers, the serial
   console for VMs, SSH for macOS. No kubectl needed.
 - **Automatic expiry**: every sandbox has a TTL (default 4h, max 72h) and is

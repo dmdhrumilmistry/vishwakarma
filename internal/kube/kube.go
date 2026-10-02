@@ -134,6 +134,16 @@ func (q sizeQueue) Next() *remotecommand.TerminalSize {
 // VMConsole opens the serial console of a running VirtualMachineInstance.
 // Frames are raw bytes in both directions.
 func (c *Clients) VMConsole(ctx context.Context, ns, name string) (*websocket.Conn, error) {
+	return c.vmiStream(ctx, ns, name, "console")
+}
+
+// VMVNC opens the VNC display of a running VirtualMachineInstance: raw RFB
+// in binary frames.
+func (c *Clients) VMVNC(ctx context.Context, ns, name string) (*websocket.Conn, error) {
+	return c.vmiStream(ctx, ns, name, "vnc")
+}
+
+func (c *Clients) vmiStream(ctx context.Context, ns, name, sub string) (*websocket.Conn, error) {
 	host := strings.TrimSuffix(c.Config.Host, "/")
 	u, err := url.Parse(host)
 	if err != nil {
@@ -145,7 +155,7 @@ func (c *Clients) VMConsole(ctx context.Context, ns, name string) (*websocket.Co
 	case "http":
 		u.Scheme = "ws"
 	}
-	u.Path = strings.TrimSuffix(u.Path, "/") + fmt.Sprintf("/apis/subresources.kubevirt.io/v1/namespaces/%s/virtualmachineinstances/%s/console", ns, name)
+	u.Path = strings.TrimSuffix(u.Path, "/") + fmt.Sprintf("/apis/subresources.kubevirt.io/v1/namespaces/%s/virtualmachineinstances/%s/%s", ns, name, sub)
 
 	tlsCfg, err := rest.TLSConfigFor(c.Config)
 	if err != nil {
@@ -175,9 +185,9 @@ func (c *Clients) VMConsole(ctx context.Context, ns, name string) (*websocket.Co
 		if resp != nil {
 			body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
 			resp.Body.Close()
-			return nil, fmt.Errorf("console: %s: %s", resp.Status, strings.TrimSpace(string(body)))
+			return nil, fmt.Errorf("%s: %s: %s", sub, resp.Status, strings.TrimSpace(string(body)))
 		}
-		return nil, fmt.Errorf("console: %w", err)
+		return nil, fmt.Errorf("%s: %w", sub, err)
 	}
 	return conn, nil
 }

@@ -79,9 +79,22 @@ type Policy struct {
 	// AllowPrivilegedTemplates allows privileged containers only from
 	// templates the operator marked privileged (Android needs it), with
 	// their own image and command. AllowPrivileged allows any.
-	AllowPrivilegedTemplates bool   `json:"allowPrivilegedTemplates"`
-	AllowNodePort            bool   `json:"allowNodePort"`
-	StorageClass             string `json:"storageClass"`
+	AllowPrivilegedTemplates bool `json:"allowPrivilegedTemplates"`
+	// MacOSOnLinux enables templates that run macOS on non-Apple hardware
+	// (Docker-OSX). Apple's license only permits macOS on Apple hardware, so
+	// this is off unless the operator turns it on. Such templates also need
+	// /dev/kvm on the nodes.
+	MacOSOnLinux bool `json:"macosOnLinux"`
+	// AndroidScreenImage is the sidecar that streams Android screens to the
+	// console. Defaults to the image built with this release.
+	AndroidScreenImage string `json:"androidScreenImage"`
+	// AndroidPlayStoreImage is a redroid image with Google Play built by the
+	// operator (images/android-playstore/build.sh). Google's apps cannot be
+	// redistributed, so there is no default; setting it adds the
+	// "Android 12 with Play Store" template to the built-in catalogue.
+	AndroidPlayStoreImage string `json:"androidPlayStoreImage"`
+	AllowNodePort         bool   `json:"allowNodePort"`
+	StorageClass          string `json:"storageClass"`
 
 	Defaults Resources `json:"defaults"`
 	Limits   Resources `json:"limits"`
@@ -97,6 +110,10 @@ type Policy struct {
 	Tolerations  []Toleration      `json:"tolerations"`
 
 	Templates []Template `json:"templates"`
+
+	// ServerNamespace is where the server runs (from VK_SERVER_NAMESPACE);
+	// sandbox screen ports admit traffic from it only.
+	ServerNamespace string `json:"-"`
 }
 
 // Resources is a CPU, memory and disk triple in Kubernetes quantity notation.
@@ -185,7 +202,31 @@ type Template struct {
 	Resources Resources `json:"resources"`
 	// Env is set in the container.
 	Env map[string]string `json:"env"`
+	// Screen gives the sandbox a Screen tab in the console (VNC).
+	Screen *Screen `json:"screen,omitempty"`
+	// ExtraResources are added to the container's requests and limits, e.g.
+	// devices.kubevirt.io/kvm: "1" for /dev/kvm through KubeVirt's device
+	// plugin.
+	ExtraResources map[string]string `json:"extraResources,omitempty"`
+	// MacOSOnLinux marks a template that runs macOS on non-Apple hardware;
+	// it needs Policy.MacOSOnLinux.
+	MacOSOnLinux bool `json:"macosOnLinux,omitempty"`
 }
+
+// Screen is how a container sandbox serves its display over VNC.
+type Screen struct {
+	// Port is the VNC port inside the pod.
+	Port int32 `json:"port"`
+	// Sidecar is "android" to add the Android screen sidecar (adb, scrcpy,
+	// VNC), or empty when the main container serves VNC itself.
+	Sidecar string `json:"sidecar,omitempty"`
+}
+
+// ScreenSidecarAndroid is the built-in Android screen sidecar.
+const ScreenSidecarAndroid = "android"
+
+// DefaultAndroidScreenImage is set by main to the image of this release.
+var DefaultAndroidScreenImage = "ghcr.io/dmdhrumilmistry/vishwakarma-android-screen:latest"
 
 // Duration is a time.Duration that reads "4h" style strings from YAML.
 type Duration struct{ time.Duration }
@@ -253,6 +294,7 @@ func Load() (*Config, error) {
 	if ns := os.Getenv("VK_NAMESPACE"); ns != "" {
 		c.Policy.Namespace = ns
 	}
+	c.Policy.ServerNamespace = os.Getenv("VK_SERVER_NAMESPACE")
 	return c, c.Validate()
 }
 
@@ -267,6 +309,12 @@ func ParsePolicy(raw []byte) (*Policy, error) {
 	}
 	if p.Templates == nil {
 		p.Templates = DefaultTemplates()
+		if p.AndroidPlayStoreImage != "" {
+			p.Templates = append(p.Templates, PlayStoreTemplate(p.AndroidPlayStoreImage))
+		}
+	}
+	if p.AndroidScreenImage == "" {
+		p.AndroidScreenImage = DefaultAndroidScreenImage
 	}
 	if err := p.Validate(); err != nil {
 		return nil, err
@@ -297,6 +345,22 @@ func DefaultPolicy() *Policy {
 	}
 }
 
+// PlayStoreTemplate is Android 12 with Google Play from the given image.
+func PlayStoreTemplate(image string) Template {
+	var t Template
+	for _, d := range DefaultTemplates() {
+		if d.Name == "android-12" {
+			t = d
+		}
+	}
+	t.Name = "android-12-playstore"
+	t.DisplayName = "Android 12 with Play Store"
+	t.Image = image
+	t.Resources = Resources{CPU: "2", Memory: "3Gi"}
+	t.Description = "Android with Google Play. Register the device ID at google.com/android/uncertified before signing in"
+	return t
+}
+
 // DefaultTemplates is the built-in catalogue.
 func DefaultTemplates() []Template {
 	sleep := []string{"sleep", "infinity"}
@@ -313,8 +377,22 @@ func DefaultTemplates() []Template {
 			Shell:       "/system/bin/sh",
 			Privileged:  true,
 			Ports:       []int32{5555},
+			Screen:      &Screen{Port: 5900, Sidecar: ScreenSidecarAndroid},
 			Resources:   Resources{CPU: "2", Memory: "2Gi"},
-			Description: "Android in a container (redroid). Connect with adb or scrcpy on port 5555. Needs the binder kernel module on the node",
+			Description: "Android in a container (redroid), screen in the browser. adb on port 5555. Needs the binder kernel module on the node",
+		},
+		{
+			Name: "macos-linux", DisplayName: "macOS on Linux (Docker-OSX)", Kind: KindContainer,
+			Image:          "sickcodes/docker-osx:auto",
+			Env:            map[string]string{"EXTRA": "-display none -vnc 0.0.0.0:99", "RAM": "6", "CORES": "4"},
+			Ports:          []int32{10022},
+			Screen:         &Screen{Port: 5999},
+			User:           "user",
+			Password:       "alpine",
+			ExtraResources: map[string]string{"devices.kubevirt.io/kvm": "1"},
+			Resources:      Resources{CPU: "4", Memory: "8Gi"},
+			MacOSOnLinux:   true,
+			Description:    "macOS Catalina under QEMU on a Linux node with /dev/kvm. SSH on 10022 (user / alpine). Not licensed by Apple on non-Apple hardware",
 		},
 		{Name: "ubuntu-24.04-vm", DisplayName: "Ubuntu 24.04 VM", Kind: KindVM, Image: "quay.io/containerdisks/ubuntu:24.04", User: "ubuntu", Resources: Resources{Memory: "2Gi"}, Description: "Full Ubuntu VM with systemd and its own kernel"},
 		{Name: "fedora-vm", DisplayName: "Fedora VM", Kind: KindVM, Image: "quay.io/containerdisks/fedora:latest", User: "fedora", Resources: Resources{Memory: "2Gi"}, Description: "Full Fedora VM"},
@@ -383,6 +461,22 @@ func (p *Policy) Validate() error {
 		}
 		if t.Image == "" {
 			errs = append(errs, fmt.Errorf("%s: image is required", where))
+		}
+		if t.Screen != nil {
+			if t.Kind != KindContainer {
+				errs = append(errs, fmt.Errorf("%s: screen applies to containers; VMs and macOS have one already", where))
+			}
+			if t.Screen.Port < 1 || t.Screen.Port > 65535 {
+				errs = append(errs, fmt.Errorf("%s: screen.port is out of range", where))
+			}
+			if t.Screen.Sidecar != "" && t.Screen.Sidecar != ScreenSidecarAndroid {
+				errs = append(errs, fmt.Errorf("%s: screen.sidecar must be empty or %q", where, ScreenSidecarAndroid))
+			}
+		}
+		for k, q := range t.ExtraResources {
+			if _, err := resource.ParseQuantity(q); err != nil {
+				errs = append(errs, fmt.Errorf("%s: extraResources.%s: %q is not a quantity", where, k, q))
+			}
 		}
 		for field, q := range map[string]string{"cpu": t.Resources.CPU, "memory": t.Resources.Memory, "disk": t.Resources.Disk} {
 			if q == "" {

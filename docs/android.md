@@ -2,8 +2,10 @@
 
 Android runs as a container with [redroid](https://github.com/remote-android/redroid-doc)
 (Remote anDroid): a full Android userspace sharing the node's Linux kernel.
-It starts in under a minute, keeps its data on a volume, and you connect
-with `adb` and [scrcpy](https://github.com/Genymobile/scrcpy).
+It starts in under a minute, keeps its data on a volume, and its **screen
+is in the browser**: the console's Screen tab shows the device and takes
+mouse and keyboard input. `adb` and [scrcpy](https://github.com/Genymobile/scrcpy)
+work too.
 
 ## Enable it
 
@@ -37,7 +39,75 @@ driver.
 
 The **Android 12** template then appears in the console.
 
-## Use it
+## Screen in the browser
+
+Every Android sandbox gets a sidecar container (`vishwakarma-android-screen`)
+that connects to the device over the pod's loopback, mirrors it with scrcpy
+into a virtual display and serves it over VNC. The console's **Screen** tab
+shows it with noVNC: click to tap, drag to swipe, type to enter text, and
+use the Back, Home and Recents buttons. Nothing extra to install or expose:
+only the Vishwakarma server can reach the screen port (the sandbox
+NetworkPolicy admits it from the server namespace only).
+
+The sidecar image is x86_64 only, because scrcpy publishes static Linux
+builds for x86_64. Override it with `sandboxes.androidScreenImage`.
+
+### Copy and paste
+
+- **Into the device:** press Ctrl+V on the screen (or type in the clipboard
+  box below it and click **Paste into device**). The sidecar types the text
+  into the focused field, with Enter for line breaks. It uses
+  `adb shell input text`, so it is limited to ASCII.
+- **From the device:** copy as usual on the device (long press, or select
+  and Ctrl+C). The text appears in the clipboard box, with a **Copy** button
+  to put it on your computer's clipboard.
+
+This also works on plain HTTP, where browsers do not offer the Clipboard
+API.
+
+## Google Play (Play Store)
+
+redroid ships without Google's apps, and Google does not allow
+redistributing them, so Vishwakarma cannot publish a Play Store image.
+Build one yourself from [MindTheGapps](https://github.com/MindTheGapps)
+(pinned by checksum) with the script in this repository:
+
+```bash
+images/android-playstore/build.sh                       # vishwakarma/redroid-playstore:12
+IMAGE=registry.lan/redroid-playstore:12 images/android-playstore/build.sh
+docker push registry.lan/redroid-playstore:12          # a private registry
+# or, without a registry, on each node:
+docker save vishwakarma/redroid-playstore:12 | ssh node 'sudo k3s ctr -n k8s.io images import -'
+```
+
+Then set the image; the **Android 12 with Play Store** template appears:
+
+```yaml
+sandboxes:
+  allowPrivilegedTemplates: true
+  androidPlayStoreImage: registry.lan/redroid-playstore:12
+```
+
+The build leaves out Google's SetupWizard, which crash-loops on redroid
+(it needs Wi-Fi permissions redroid does not have) and would hide the
+launcher. On first boot Play services updates itself for a minute or two
+before Play Store opens.
+
+**Signing in.** Google blocks sign-in on uncertified devices until you
+register the device's GSF ID at <https://www.google.com/android/uncertified>.
+Read the ID (a decimal number) from the sandbox:
+
+```bash
+kubectl exec -n vishwakarma-sandboxes deploy/<name> -c sandbox -- \
+  cat /data/data/com.google.android.gsf/databases/gservices.db > gservices.db
+sqlite3 gservices.db "select value from main where name = 'android_id';"
+```
+
+Register it, wait a few minutes, then sign in from the Screen tab. Give the
+sandbox a persistent volume so the registration and sign-in survive a stop
+and start; a new sandbox has a new ID.
+
+## adb and scrcpy from your machine
 
 Create it with **Reachable from: On every node (NodePort)** to reach adb
 from your machine; the Overview tab shows the address and the command:

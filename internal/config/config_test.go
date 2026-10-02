@@ -83,3 +83,26 @@ func TestConfigValidate(t *testing.T) {
 		}
 	}
 }
+
+func TestPlayStoreTemplate(t *testing.T) {
+	p, err := ParsePolicy(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := p.Template("android-12-playstore"); ok {
+		t.Error("no Play Store template without an image: Google Play is not redistributable")
+	}
+	p, err = ParsePolicy([]byte("androidPlayStoreImage: registry.lan/redroid-playstore:12"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tpl, ok := p.Template("android-12-playstore")
+	if !ok || tpl.Image != "registry.lan/redroid-playstore:12" || !tpl.Privileged || tpl.Screen == nil {
+		t.Fatalf("play store template %+v", tpl)
+	}
+	// Explicit catalogues are the operator's; nothing is added to them.
+	p, _ = ParsePolicy([]byte("androidPlayStoreImage: x\ntemplates: [{name: a, kind: container, image: b}]"))
+	if len(p.Templates) != 1 {
+		t.Errorf("templates %+v", p.Templates)
+	}
+}
