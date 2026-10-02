@@ -1,0 +1,20 @@
+/bin/
+/dist/
+*.exe
+*.test
+*.out
+coverage.*
+
+# Local secrets and cluster access. Never commit these.
+.env
+*.env
+kubeconfig
+*.kubeconfig
+/dev/
+*-secret*.yaml
+*.pem
+*.key
+
+.idea/
+.vscode/
+.DS_Store
