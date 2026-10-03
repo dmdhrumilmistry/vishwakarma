@@ -235,7 +235,7 @@ macos:
   simulator:
     enabled: true
 sandboxes:
-  publicHost: 192.168.29.57   # a node IP
+  publicHost: 192.168.1.10   # a node IP
 ```
 
 macOS sandboxes then go through the whole flow (create, pull, boot, stop,
