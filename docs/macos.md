@@ -197,6 +197,11 @@ download, no boot picker), in minutes once the node has cached the image.
    kubectl -n vishwakarma-sandboxes create secret docker-registry dockerhub      --docker-server=https://index.docker.io/v1/      --docker-username=<user> --docker-password=<access token>
    ```
 
+   Or let the chart create it (`sandboxes.registryCredentials.create=true`
+   with `username` and `password`); it is then named `registry-credentials`
+   (pass `PUSH_SECRET=registry-credentials` to the snapshot script) and added
+   to the sandbox pull secrets for you.
+
 4. Snapshot. A Job compresses the disk and kaniko pushes it from the node;
    nothing large passes through your machine:
 
