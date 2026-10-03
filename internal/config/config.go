@@ -429,8 +429,11 @@ func DefaultTemplates() []Template {
 			Image: "sickcodes/docker-osx:latest",
 			Env: map[string]string{
 				"SHORTNAME": "ventura",
-				"RAM":       "4",
-				"EXTRA":     "-display none -vnc 0.0.0.0:99",
+				// Guest RAM in GB. QEMU's software emulation adds a
+				// translation cache of up to 1 GiB on top, which the memory
+				// limit below has to cover.
+				"RAM":   "3",
+				"EXTRA": "-display none -vnc 0.0.0.0:99",
 				// The installed system lives on the persistent /data volume,
 				// so it survives stop, start and restarts.
 				"IMAGE_PATH": "/data/mac_hdd_ng.img",
@@ -446,7 +449,7 @@ func DefaultTemplates() []Template {
 				"CPUID_FLAGS": "vendor=GenuineIntel,+invtsc,vmware-cpuid-freq=on,+ssse3,+sse4.2,+popcnt,check,",
 			},
 			ReserveMemory: true,
-			// 4 GiB guest (RAM above) plus QEMU's own overhead.
+			// 3 GB guest (RAM above), QEMU's translation cache and overhead.
 			Resources:    Resources{CPU: "4", Memory: "4608Mi", Disk: "50Gi"},
 			MacOSOnLinux: true,
 			Description:  "macOS under QEMU (Docker-OSX): install it once from the Screen tab, it is kept on the /data volume. Fast with /dev/kvm on the node, very slow without. SSH on 10022 once Remote Login is on. Not licensed by Apple on non-Apple hardware",

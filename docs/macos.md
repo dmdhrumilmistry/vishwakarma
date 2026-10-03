@@ -162,7 +162,8 @@ open the Screen tab, then:
   VM, enable nested virtualization (VMware: "Virtualize Intel VT-x/EPT";
   VMware cannot do this while Windows runs Hyper-V, for example for WSL2 or
   Docker Desktop).
-- **Memory is reserved in full** (4.5 GiB: a 4 GiB guest plus QEMU), so the
+- **Memory is reserved in full** (4.5 GiB: a 3 GB guest plus QEMU and its
+  translation cache), so the
   sandbox only lands on a node with that much free and cannot push a node
   into swap. On a small single node, trim KubeVirt (see [vms.md](vms.md)).
 - **The install persists.** The sandbox gets a 50 GiB volume at `/data`;
