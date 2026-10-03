@@ -67,10 +67,9 @@ API.
 
 ## Google Play (Play Store)
 
-redroid ships without Google's apps, and Google does not allow
-redistributing them, so Vishwakarma cannot publish a Play Store image.
-Build one yourself from [MindTheGapps](https://github.com/MindTheGapps)
-(pinned by checksum) with the script in this repository:
+redroid ships without Google's apps. The Play Store images add them from
+[MindTheGapps](https://github.com/MindTheGapps) (pinned by checksum). Build
+your own with the script in this repository:
 
 ```bash
 images/android-playstore/build.sh                       # vishwakarma/redroid-playstore:12
@@ -80,13 +79,32 @@ docker push registry.lan/redroid-playstore:12          # a private registry
 docker save vishwakarma/redroid-playstore:12 | ssh node 'sudo k3s ctr -n k8s.io images import -'
 ```
 
-Then set the image; the **Android 12 with Play Store** template appears:
+The release workflow publishes both variants, and the chart uses them by
+default:
+
+| Template | Image |
+|---|---|
+| Android 12 with Play Store | `ghcr.io/dmdhrumilmistry/vishwakarma-redroid-playstore:12` |
+| Android 12 with Play Store (unrooted) | `ghcr.io/dmdhrumilmistry/vishwakarma-redroid-playstore:12-unrooted` |
+
+Point them at your own builds, or set them to `""` to remove the templates:
 
 ```yaml
 sandboxes:
   allowPrivilegedTemplates: true
   androidPlayStoreImage: registry.lan/redroid-playstore:12
+  androidPlayStoreUnrootedImage: registry.lan/redroid-playstore:12-unrooted
 ```
+
+### Unrooted
+
+Stock redroid is a rooted `userdebug` build. `UNROOTED=1 build.sh` (the
+`-unrooted` image) removes `su` and presents a production build
+(`ro.debuggable=0`, `ro.build.type=user`, `ro.build.tags=release-keys`), so
+apps that refuse rooted devices start. It cannot pass Play Integrity's
+device or strong checks, which need hardware attestation no emulator has.
+Your own access is unchanged: the console terminal still runs as root in
+the container, and adb still works (as the `shell` user).
 
 The build leaves out Google's SetupWizard, which crash-loops on redroid
 (it needs Wi-Fi permissions redroid does not have) and would hide the

@@ -30,6 +30,8 @@ const (
 	AnnShell      = "vishwakarma.io/shell"
 	AnnUser       = "vishwakarma.io/user"
 	AnnDisk       = "vishwakarma.io/disk"
+	// AnnEmulated marks a sandbox that wanted /dev/kvm but runs without it.
+	AnnEmulated = "vishwakarma.io/emulated"
 	// AnnScreenPort is the VNC port of a container with a screen.
 	AnnScreenPort = "vishwakarma.io/screen-port"
 )
@@ -111,7 +113,9 @@ type Sandbox struct {
 	// Simulated marks a macOS VM from the agent simulator (no real guest).
 	Simulated bool `json:"simulated,omitempty"`
 	// Screen is set when the console can show the sandbox display (VNC).
-	Screen    bool       `json:"screen,omitempty"`
+	Screen bool `json:"screen,omitempty"`
+	// Emulated means the sandbox runs without /dev/kvm (software emulation).
+	Emulated  bool       `json:"emulated,omitempty"`
 	Endpoints []Endpoint `json:"endpoints"`
 }
 

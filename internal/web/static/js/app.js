@@ -443,6 +443,7 @@ function detailView(name, tab) {
         h('div', { class: 'row' }, h('h1', {}, s.name), chip(s.status), kindTags(s)),
         h('p', { class: 'muted sub small' },
           friendly(s.message),
+          s.emulated ? 'Runs under software emulation (no node has /dev/kvm): booting and installing take a long time. ' : '',
           `Deletes itself in ${until(s.expiresAt)}.`)),
       h('div', { class: 'row' },
         stopped

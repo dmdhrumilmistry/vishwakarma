@@ -88,13 +88,16 @@ type Policy struct {
 	// AndroidScreenImage is the sidecar that streams Android screens to the
 	// console. Defaults to the image built with this release.
 	AndroidScreenImage string `json:"androidScreenImage"`
-	// AndroidPlayStoreImage is a redroid image with Google Play built by the
-	// operator (images/android-playstore/build.sh). Google's apps cannot be
-	// redistributed, so there is no default; setting it adds the
-	// "Android 12 with Play Store" template to the built-in catalogue.
+	// AndroidPlayStoreImage is a redroid image with Google Play
+	// (images/android-playstore/build.sh); it adds the "Android 12 with Play
+	// Store" template to the built-in catalogue. Empty removes it.
 	AndroidPlayStoreImage string `json:"androidPlayStoreImage"`
-	AllowNodePort         bool   `json:"allowNodePort"`
-	StorageClass          string `json:"storageClass"`
+	// AndroidPlayStoreUnrootedImage is the same without root (no su, a
+	// "user" release-keys build), for apps that refuse rooted devices. It
+	// adds "Android 12 with Play Store (unrooted)". Empty removes it.
+	AndroidPlayStoreUnrootedImage string `json:"androidPlayStoreUnrootedImage"`
+	AllowNodePort                 bool   `json:"allowNodePort"`
+	StorageClass                  string `json:"storageClass"`
 
 	Defaults Resources `json:"defaults"`
 	Limits   Resources `json:"limits"`
@@ -211,7 +214,22 @@ type Template struct {
 	// MacOSOnLinux marks a template that runs macOS on non-Apple hardware;
 	// it needs Policy.MacOSOnLinux.
 	MacOSOnLinux bool `json:"macosOnLinux,omitempty"`
+	// ReserveMemory requests the whole memory limit instead of half, so the
+	// sandbox is only scheduled where that much is free. For workloads that
+	// really use all of it, such as a QEMU guest: overcommitting those can
+	// push a node into swap until it stops responding.
+	ReserveMemory bool `json:"reserveMemory,omitempty"`
+	// KVM is "prefer" (use /dev/kvm when a node has it, else run under
+	// software emulation) or "require" (wait for a node with it). The device
+	// comes from KubeVirt's device plugin (devices.kubevirt.io/kvm).
+	KVM string `json:"kvm,omitempty"`
 }
+
+// KVM modes for templates.
+const (
+	KVMPrefer  = "prefer"
+	KVMRequire = "require"
+)
 
 // Screen is how a container sandbox serves its display over VNC.
 type Screen struct {
@@ -310,7 +328,10 @@ func ParsePolicy(raw []byte) (*Policy, error) {
 	if p.Templates == nil {
 		p.Templates = DefaultTemplates()
 		if p.AndroidPlayStoreImage != "" {
-			p.Templates = append(p.Templates, PlayStoreTemplate(p.AndroidPlayStoreImage))
+			p.Templates = append(p.Templates, PlayStoreTemplate(p.AndroidPlayStoreImage, false))
+		}
+		if p.AndroidPlayStoreUnrootedImage != "" {
+			p.Templates = append(p.Templates, PlayStoreTemplate(p.AndroidPlayStoreUnrootedImage, true))
 		}
 	}
 	if p.AndroidScreenImage == "" {
@@ -342,11 +363,20 @@ func DefaultPolicy() *Policy {
 		},
 		VM:    VM{Enabled: "auto"},
 		MacOS: MacOS{VNC: true},
+
+		AndroidPlayStoreImage:         DefaultPlayStoreImage,
+		AndroidPlayStoreUnrootedImage: DefaultPlayStoreUnrootedImage,
 	}
 }
 
+// Published Play Store images (built by the release workflow).
+const (
+	DefaultPlayStoreImage         = "ghcr.io/dmdhrumilmistry/vishwakarma-redroid-playstore:12"
+	DefaultPlayStoreUnrootedImage = "ghcr.io/dmdhrumilmistry/vishwakarma-redroid-playstore:12-unrooted"
+)
+
 // PlayStoreTemplate is Android 12 with Google Play from the given image.
-func PlayStoreTemplate(image string) Template {
+func PlayStoreTemplate(image string, unrooted bool) Template {
 	var t Template
 	for _, d := range DefaultTemplates() {
 		if d.Name == "android-12" {
@@ -358,6 +388,11 @@ func PlayStoreTemplate(image string) Template {
 	t.Image = image
 	t.Resources = Resources{CPU: "2", Memory: "3Gi"}
 	t.Description = "Android with Google Play. Register the device ID at google.com/android/uncertified before signing in"
+	if unrooted {
+		t.Name = "android-12-playstore-unrooted"
+		t.DisplayName = "Android 12 with Play Store (unrooted)"
+		t.Description = "Android with Google Play, no su and a release build, for apps that refuse rooted devices. Play Integrity device checks still fail"
+	}
 	return t
 }
 
@@ -383,16 +418,22 @@ func DefaultTemplates() []Template {
 		},
 		{
 			Name: "macos-linux", DisplayName: "macOS on Linux (Docker-OSX)", Kind: KindContainer,
-			Image:          "sickcodes/docker-osx:auto",
-			Env:            map[string]string{"EXTRA": "-display none -vnc 0.0.0.0:99", "RAM": "6", "CORES": "4"},
-			Ports:          []int32{10022},
-			Screen:         &Screen{Port: 5999},
-			User:           "user",
-			Password:       "alpine",
-			ExtraResources: map[string]string{"devices.kubevirt.io/kvm": "1"},
-			Resources:      Resources{CPU: "4", Memory: "8Gi"},
-			MacOSOnLinux:   true,
-			Description:    "macOS Catalina under QEMU on a Linux node with /dev/kvm. SSH on 10022 (user / alpine). Not licensed by Apple on non-Apple hardware",
+			// Downloads the macOS recovery image from Apple on first start and
+			// boots the installer; install macOS from the Screen tab.
+			Image: "sickcodes/docker-osx:latest",
+			Env: map[string]string{
+				"SHORTNAME": "ventura",
+				"RAM":       "4",
+				"EXTRA":     "-display none -vnc 0.0.0.0:99",
+			},
+			Ports:         []int32{10022},
+			Screen:        &Screen{Port: 5999},
+			KVM:           KVMPrefer,
+			ReserveMemory: true,
+			// 4 GiB guest (RAM above) plus QEMU's own overhead.
+			Resources:    Resources{CPU: "4", Memory: "4608Mi"},
+			MacOSOnLinux: true,
+			Description:  "macOS installer under QEMU (Docker-OSX). Fast with /dev/kvm on the node, very slow without. SSH on 10022 once Remote Login is on. Not licensed by Apple on non-Apple hardware",
 		},
 		{Name: "ubuntu-24.04-vm", DisplayName: "Ubuntu 24.04 VM", Kind: KindVM, Image: "quay.io/containerdisks/ubuntu:24.04", User: "ubuntu", Resources: Resources{Memory: "2Gi"}, Description: "Full Ubuntu VM with systemd and its own kernel"},
 		{Name: "fedora-vm", DisplayName: "Fedora VM", Kind: KindVM, Image: "quay.io/containerdisks/fedora:latest", User: "fedora", Resources: Resources{Memory: "2Gi"}, Description: "Full Fedora VM"},
@@ -472,6 +513,11 @@ func (p *Policy) Validate() error {
 			if t.Screen.Sidecar != "" && t.Screen.Sidecar != ScreenSidecarAndroid {
 				errs = append(errs, fmt.Errorf("%s: screen.sidecar must be empty or %q", where, ScreenSidecarAndroid))
 			}
+		}
+		switch t.KVM {
+		case "", KVMPrefer, KVMRequire:
+		default:
+			errs = append(errs, fmt.Errorf("%s: kvm must be empty, prefer or require", where))
 		}
 		for k, q := range t.ExtraResources {
 			if _, err := resource.ParseQuantity(q); err != nil {

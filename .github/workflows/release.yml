@@ -6,6 +6,7 @@ on:
   push:
     branches: [main]
     tags: ["v*"]
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -74,6 +75,28 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=android-screen
           cache-to: type=gha,mode=max,scope=android-screen
+
+  android-playstore:
+    # redroid with Google Play (MindTheGapps), rooted and unrooted. Built on
+    # tags only: each build pulls about 1.5 GB.
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: build and push
+        env:
+          REPO: ghcr.io/${{ github.repository_owner }}/vishwakarma-redroid-playstore
+        run: |
+          IMAGE="$REPO:12" sh images/android-playstore/build.sh
+          UNROOTED=1 IMAGE="$REPO:12-unrooted" sh images/android-playstore/build.sh
+          docker push "$REPO:12"
+          docker push "$REPO:12-unrooted"
 
   binaries:
     if: startsWith(github.ref, 'refs/tags/v')

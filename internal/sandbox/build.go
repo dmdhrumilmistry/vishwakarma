@@ -43,11 +43,15 @@ type plan struct {
 	// Screen serves the display over VNC (containers).
 	Screen *config.Screen
 	// Extra are added to the container's requests and limits (e.g. /dev/kvm).
-	Extra     map[string]resource.Quantity
-	SSHKey    string
-	CloudInit string
-	Owner     string
-	ExpiresAt time.Time
+	Extra map[string]resource.Quantity
+	// Emulated: the template wanted /dev/kvm but no node has it.
+	Emulated bool
+	// ReserveMemory requests the full memory limit.
+	ReserveMemory bool
+	SSHKey        string
+	CloudInit     string
+	Owner         string
+	ExpiresAt     time.Time
 }
 
 func (p *plan) labels() map[string]string {
@@ -86,6 +90,9 @@ func (p *plan) annotations() map[string]string {
 	if p.Screen != nil {
 		a[AnnScreenPort] = strconv.Itoa(int(p.Screen.Port))
 	}
+	if p.Emulated {
+		a[AnnEmulated] = "true"
+	}
 	return a
 }
 
@@ -105,6 +112,9 @@ func buildDeployment(p *plan, pol *config.Policy) *appsv1.Deployment {
 	requests := corev1.ResourceList{
 		corev1.ResourceCPU:    fraction(p.CPU, 4, "10m"),
 		corev1.ResourceMemory: fraction(p.Memory, 2, "16Mi"),
+	}
+	if p.ReserveMemory {
+		requests[corev1.ResourceMemory] = p.Memory
 	}
 	// Device resources (devices.kubevirt.io/kvm) must have requests equal
 	// to limits.

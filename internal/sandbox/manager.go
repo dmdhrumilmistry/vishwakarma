@@ -45,6 +45,10 @@ type Manager struct {
 	vmCached  bool
 	vmChecked time.Time
 
+	kvmMu      sync.Mutex
+	kvmCached  bool
+	kvmChecked time.Time
+
 	// mac runs macOS sandboxes on Mac host agents; nil when not configured.
 	mac        *macos.Pool
 	macMu      sync.Mutex
@@ -65,6 +69,33 @@ func (m *Manager) Policy() *config.Policy { return m.policy }
 
 // Namespace is where sandboxes live.
 func (m *Manager) Namespace() string { return m.policy.Namespace }
+
+// KVMResource is the /dev/kvm device KubeVirt's device plugin hands out.
+const KVMResource = "devices.kubevirt.io/kvm"
+
+// KVMAvailable reports whether any node offers /dev/kvm. Cached for a
+// minute; false when nodes cannot be read (the server then runs such
+// templates under emulation rather than leaving them Pending forever).
+func (m *Manager) KVMAvailable(ctx context.Context) bool {
+	m.kvmMu.Lock()
+	defer m.kvmMu.Unlock()
+	if m.now().Sub(m.kvmChecked) < time.Minute {
+		return m.kvmCached
+	}
+	m.kvmChecked = m.now()
+	m.kvmCached = false
+	nodes, err := m.kube.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		m.log.Warn("cannot list nodes to look for /dev/kvm; assuming none", "err", err)
+		return false
+	}
+	for _, n := range nodes.Items {
+		if q, ok := n.Status.Allocatable[corev1.ResourceName(KVMResource)]; ok && q.Value() > 0 {
+			m.kvmCached = true
+		}
+	}
+	return m.kvmCached
+}
 
 // VMsAvailable reports whether VM sandboxes can be created.
 func (m *Manager) VMsAvailable(ctx context.Context) bool {
@@ -163,6 +194,20 @@ func (m *Manager) resolve(ctx context.Context, s Spec, caller Caller) (*plan, er
 			p.Extra = map[string]resource.Quantity{}
 			for k, v := range tpl.ExtraResources {
 				p.Extra[k] = resource.MustParse(v)
+			}
+		}
+		p.ReserveMemory = tpl.ReserveMemory
+		if tpl.KVM != "" {
+			switch has := m.KVMAvailable(ctx); {
+			case has:
+				if p.Extra == nil {
+					p.Extra = map[string]resource.Quantity{}
+				}
+				p.Extra[KVMResource] = resource.MustParse("1")
+			case tpl.KVM == config.KVMRequire:
+				return nil, invalid("template %q needs /dev/kvm and no node has it", tpl.Name)
+			default:
+				p.Emulated = true
 			}
 		}
 	}
@@ -800,6 +845,7 @@ func fromDeployment(d *appsv1.Deployment, pods []corev1.Pod) Sandbox {
 		}
 	}
 	s.Disk = d.Annotations[AnnDisk]
+	s.Emulated = d.Annotations[AnnEmulated] == "true"
 	s.Screen = d.Annotations[AnnScreenPort] != ""
 
 	switch {

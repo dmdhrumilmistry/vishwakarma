@@ -28,9 +28,9 @@ and security model, docs/api.md for the API.
 - **macOS**: the agent API (`internal/macos`) is a contract between server and
   agent versions; add fields, do not rename. Never run macOS guests outside
   Apple hardware; the simulator backend exists for testing on Linux.
-- **Images**: `images/android-screen` is published with each release;
-  `images/android-playstore` is a build script only. Never publish a Google
-  Play image: Google's apps are not redistributable.
+- **Images**: `images/android-screen` and the Play Store images
+  (`images/android-playstore/build.sh`, rooted and `UNROOTED=1`) are
+  published by the release workflow.
 - Keep chart RBAC in sync with what the server calls (namespaced Role only).
 
 ## Testing

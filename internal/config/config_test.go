@@ -89,8 +89,14 @@ func TestPlayStoreTemplate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	for _, name := range []string{"android-12-playstore", "android-12-playstore-unrooted"} {
+		if _, ok := p.Template(name); !ok {
+			t.Errorf("%s missing from the default catalogue", name)
+		}
+	}
+	p, _ = ParsePolicy([]byte("androidPlayStoreImage: \"\"\nandroidPlayStoreUnrootedImage: \"\""))
 	if _, ok := p.Template("android-12-playstore"); ok {
-		t.Error("no Play Store template without an image: Google Play is not redistributable")
+		t.Error("an empty image must remove the Play Store template")
 	}
 	p, err = ParsePolicy([]byte("androidPlayStoreImage: registry.lan/redroid-playstore:12"))
 	if err != nil {

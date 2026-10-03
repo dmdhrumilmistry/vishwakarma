@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/dmdhrumilmistry/vishwakarma/internal/config"
@@ -80,6 +81,9 @@ func TestMacOSOnLinux(t *testing.T) {
 		t.Fatalf("disabled by default: %v", err)
 	}
 
+	kvm := corev1.ResourceName(KVMResource)
+
+	// No node offers /dev/kvm: run under emulation instead of Pending forever.
 	on := newFixture(t, func(p *config.Policy) { p.MacOSOnLinux = true })
 	sb, err := on.m.Create(ctx, Spec{Name: "osx", Template: "macos-linux"}, alice)
 	if err != nil {
@@ -87,33 +91,52 @@ func TestMacOSOnLinux(t *testing.T) {
 	}
 	d, _ := on.kube.AppsV1().Deployments(ns).Get(ctx, "osx", metav1.GetOptions{})
 	c := d.Spec.Template.Spec.Containers[0]
-	kvm := corev1.ResourceName("devices.kubevirt.io/kvm")
+	if _, ok := c.Resources.Limits[kvm]; ok {
+		t.Error("requested /dev/kvm although no node has it")
+	}
+	if !sb.Emulated {
+		t.Error("sandbox must report software emulation")
+	}
+	if c.SecurityContext.Privileged != nil {
+		t.Error("Docker-OSX must not run privileged")
+	}
+	if !c.Resources.Requests.Memory().Equal(*c.Resources.Limits.Memory()) {
+		t.Errorf("memory request %v must equal the limit %v: a QEMU guest uses all of it", c.Resources.Requests.Memory(), c.Resources.Limits.Memory())
+	}
+	if !sb.Screen || d.Annotations[AnnScreenPort] != "5999" {
+		t.Errorf("screen %v %q", sb.Screen, d.Annotations[AnnScreenPort])
+	}
+
+	// A node with /dev/kvm: request the device.
+	withKVM := newFixture(t, func(p *config.Policy) { p.MacOSOnLinux = true })
+	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "n1"}, Status: corev1.NodeStatus{
+		Allocatable: corev1.ResourceList{kvm: resource.MustParse("110")},
+	}}
+	if _, err := withKVM.kube.CoreV1().Nodes().Create(ctx, node, metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	sb, err = withKVM.m.Create(ctx, Spec{Name: "osx", Template: "macos-linux"}, alice)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, _ = withKVM.kube.AppsV1().Deployments(ns).Get(ctx, "osx", metav1.GetOptions{})
+	c = d.Spec.Template.Spec.Containers[0]
 	if q := c.Resources.Limits[kvm]; q.Value() != 1 {
 		t.Errorf("kvm limit %v", q.String())
 	}
 	if q := c.Resources.Requests[kvm]; q.Value() != 1 {
 		t.Errorf("kvm request %v: device resources need requests equal to limits", q.String())
 	}
-	if c.SecurityContext.Privileged != nil {
-		t.Error("Docker-OSX gets /dev/kvm from the device plugin, not from privileged")
-	}
-	if !sb.Screen || d.Annotations[AnnScreenPort] != "5999" {
-		t.Errorf("screen %v %q", sb.Screen, d.Annotations[AnnScreenPort])
-	}
-	cr, err := on.m.Credentials(ctx, "osx", alice)
-	if err != nil || cr.User != "user" || cr.Password != "alpine" {
-		t.Errorf("template login %+v %v", cr, err)
+	if sb.Emulated {
+		t.Error("with KVM the sandbox is not emulated")
 	}
 
 	// A custom image keeps neither the template's devices nor its screen.
-	if _, err := on.m.Create(ctx, Spec{Name: "other", Template: "macos-linux", Image: "nginx"}, alice); err != nil {
+	if _, err := withKVM.m.Create(ctx, Spec{Name: "other", Template: "macos-linux", Image: "nginx"}, alice); err != nil {
 		t.Fatal(err)
 	}
-	d2, _ := on.kube.AppsV1().Deployments(ns).Get(ctx, "other", metav1.GetOptions{})
+	d2, _ := withKVM.kube.AppsV1().Deployments(ns).Get(ctx, "other", metav1.GetOptions{})
 	if _, ok := d2.Spec.Template.Spec.Containers[0].Resources.Limits[kvm]; ok {
 		t.Error("custom image inherited /dev/kvm")
-	}
-	if _, err := on.m.Credentials(ctx, "other", alice); err == nil {
-		t.Error("custom image inherited the template login")
 	}
 }

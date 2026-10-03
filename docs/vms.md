@@ -30,6 +30,18 @@ assisted virtualization to the guest OS" on the node VM instead to get full
 speed. Under emulation start with the CirrOS template to confirm everything
 works, then move to Ubuntu or Fedora (allow a few minutes for first boot).
 
+### Small single-node clusters
+
+KubeVirt runs two replicas of most of its components by default, about
+2.7 GiB of memory requests. On a single node the second copies add nothing:
+
+```bash
+kubectl -n kubevirt patch kubevirt kubevirt --type merge -p '{"spec":{"infra":{"replicas":1}}}'
+kubectl -n kubevirt scale deploy virt-operator --replicas=1
+```
+
+That frees about 0.9 GiB for sandboxes.
+
 ## How VM sandboxes work
 
 - The root disk is a **containerDisk** image (for example

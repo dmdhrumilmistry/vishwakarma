@@ -138,27 +138,32 @@ forwarded ports.
 
 For Linux clusters there is also a **real** macOS option: the
 `macos-linux` template runs [Docker-OSX](https://github.com/sickcodes/Docker-OSX)
-(macOS under QEMU with OpenCore) as a container. It boots the prebuilt
-`sickcodes/docker-osx:auto` image (macOS Catalina, login `user` /
-`alpine`), forwards SSH on port 10022 and shows the desktop in the Screen
-tab.
+(macOS under QEMU with OpenCore) as a container. On first start it downloads
+the macOS recovery image from Apple (Ventura by default; set `SHORTNAME` in
+a template of your own for another version) and boots the **installer**:
+open the Screen tab, erase the virtual disk in Disk Utility, then install
+macOS. SSH on port 10022 works once you turn on Remote Login in the guest.
 
-Two things to know first:
-
-- **It needs hardware virtualization** (`/dev/kvm`) on the node. The
-  container requests `devices.kubevirt.io/kvm: 1`, which KubeVirt's device
-  plugin provides on nodes with `/dev/kvm`; without it the sandbox stays
-  Pending with "Insufficient devices.kubevirt.io/kvm". Under software
-  emulation macOS is too slow to be usable, so there is no fallback. On a
-  VMware or Hyper-V node VM, enable nested virtualization (VMware:
-  "Virtualize Intel VT-x/EPT"; note VMware cannot do this while Windows
-  runs Hyper-V, for example for WSL2 or Docker Desktop).
+- **KVM is used when available.** If a node offers `/dev/kvm` (KubeVirt's
+  `devices.kubevirt.io/kvm`), the sandbox requests it and runs at near
+  native speed. If none does, it runs under QEMU software emulation instead
+  of waiting forever, and the console marks it as emulated: booting takes
+  many minutes and installing macOS takes hours. On a VMware or Hyper-V node
+  VM, enable nested virtualization (VMware: "Virtualize Intel VT-x/EPT";
+  VMware cannot do this while Windows runs Hyper-V, for example for WSL2 or
+  Docker Desktop).
+- **Memory is reserved in full** (4.5 GiB: a 4 GiB guest plus QEMU), so the
+  sandbox only lands on a node with that much free and cannot push a node
+  into swap. On a small single node, trim KubeVirt (see [vms.md](vms.md)).
+- **The install is not persistent.** The virtual disk lives in the
+  container, so stopping or deleting the sandbox loses it. A full macOS
+  install also needs 30 GB or more of free node disk.
 - **Apple's license only permits macOS on Apple hardware.** Running it on
   other hardware breaks the macOS license. The template is off until you
   set `sandboxes.macosOnLinux: true`; that decision is yours.
 
-The image is large (about 15 GB) and needs about 8 GiB of memory per
-sandbox.
+The server reads nodes (a read-only ClusterRole in the chart) to find out
+whether any node has `/dev/kvm`.
 
 ## Trying it without a Mac: the simulator
 
