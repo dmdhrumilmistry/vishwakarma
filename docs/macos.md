@@ -182,8 +182,8 @@ whether any node has `/dev/kvm`.
 ### Install once, spawn ready
 
 Installing macOS under emulation takes hours. Do it once, then turn that
-sandbox into a base image; new sandboxes from the **macOS on Linux
-(installed)** template boot it directly (no installer, no recovery
+sandbox into a base image; new sandboxes from the **macOS <Flavor> on
+Linux (installed)** templates boot it directly (no installer, no recovery
 download, no boot picker), in minutes once the node has cached the image.
 
 1. Finish the install (and the Setup Assistant, if every copy should have
@@ -206,16 +206,21 @@ download, no boot picker), in minutes once the node has cached the image.
    nothing large passes through your machine:
 
    ```bash
-   images/macos-base/snapshot.sh macos docker.io/<user>/vishwakarma-macos-ventura:13
+   images/macos-base/snapshot.sh macos docker.io/<user>/vishwakarma-macos:ventura
    ```
 
 5. Point the chart at it:
 
    ```yaml
    sandboxes:
-     macosLinuxBaseImage: docker.io/<user>/vishwakarma-macos-ventura:13
+     macosLinuxBaseImages:
+       ventura: docker.io/<user>/vishwakarma-macos:ventura
+       # tahoe: docker.io/<user>/vishwakarma-macos:tahoe
      imagePullSecrets: [dockerhub]
    ```
+
+   One private repository, one tag per flavor; each entry adds a
+   "macOS <Flavor> on Linux (installed)" template.
 
 Each new sandbox copies the disk onto its own volume on first start, so
 copies are independent. The source sandbox keeps running as before.

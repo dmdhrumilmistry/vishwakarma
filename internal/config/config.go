@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -96,13 +97,14 @@ type Policy struct {
 	// "user" release-keys build), for apps that refuse rooted devices. It
 	// adds "Android 12 with Play Store (unrooted)". Empty removes it.
 	AndroidPlayStoreUnrootedImage string `json:"androidPlayStoreUnrootedImage"`
-	// MacOSLinuxBaseImage carries an installed macOS disk
-	// (images/macos-base). With MacOSOnLinux it adds a template that boots
-	// that system directly instead of the installer. Keep the image
-	// private: it contains Apple's operating system.
-	MacOSLinuxBaseImage string `json:"macosLinuxBaseImage"`
-	AllowNodePort       bool   `json:"allowNodePort"`
-	StorageClass        string `json:"storageClass"`
+	// MacOSLinuxBaseImages maps a macOS flavor (ventura, tahoe...) to an
+	// image carrying that installed system's disk (images/macos-base). With
+	// MacOSOnLinux each adds a template that boots the system directly
+	// instead of the installer. Keep the images private: they contain
+	// Apple's operating system.
+	MacOSLinuxBaseImages map[string]string `json:"macosLinuxBaseImages"`
+	AllowNodePort        bool              `json:"allowNodePort"`
+	StorageClass         string            `json:"storageClass"`
 
 	Defaults Resources `json:"defaults"`
 	Limits   Resources `json:"limits"`
@@ -347,8 +349,15 @@ func ParsePolicy(raw []byte) (*Policy, error) {
 		if p.AndroidPlayStoreUnrootedImage != "" {
 			p.Templates = append(p.Templates, PlayStoreTemplate(p.AndroidPlayStoreUnrootedImage, true))
 		}
-		if p.MacOSLinuxBaseImage != "" {
-			p.Templates = append(p.Templates, MacOSInstalledTemplate(p.MacOSLinuxBaseImage))
+		flavors := make([]string, 0, len(p.MacOSLinuxBaseImages))
+		for f := range p.MacOSLinuxBaseImages {
+			flavors = append(flavors, f)
+		}
+		sort.Strings(flavors)
+		for _, f := range flavors {
+			if img := p.MacOSLinuxBaseImages[f]; img != "" {
+				p.Templates = append(p.Templates, MacOSInstalledTemplate(f, img))
+			}
 		}
 	}
 	if p.AndroidScreenImage == "" {
@@ -396,7 +405,7 @@ const (
 // instead of the installer. The init container copies the disk onto the
 // sandbox volume once; later starts reuse it. No recovery image, no boot
 // picker: OpenCore boots the installed disk directly.
-func MacOSInstalledTemplate(baseImage string) Template {
+func MacOSInstalledTemplate(flavor, baseImage string) Template {
 	var t Template
 	for _, d := range DefaultTemplates() {
 		if d.Name == "macos-linux" {
@@ -412,12 +421,19 @@ func MacOSInstalledTemplate(baseImage string) Template {
 	// the installed system does not need it.
 	env["BASESYSTEM_IMAGE"] = "/data/.no-recovery"
 	t.Env = env
-	t.Name = "macos-linux-installed"
-	t.DisplayName = "macOS on Linux (installed)"
+	t.Name = "macos-" + flavor + "-linux"
+	t.DisplayName = "macOS " + titleCase(flavor) + " on Linux (installed)"
 	t.InitImage = baseImage
 	t.Init = []string{"/bin/sh", "-c", "[ -e /data/mac_hdd_ng.img ] || cp /disk/mac_hdd_ng.img /data/mac_hdd_ng.img; touch /data/.no-recovery"}
 	t.Description = "Installed macOS under QEMU (Docker-OSX), ready to use: the disk comes from a base image and is kept on the /data volume. Not licensed by Apple on non-Apple hardware"
 	return t
+}
+
+func titleCase(s string) string {
+	if s == "" {
+		return s
+	}
+	return strings.ToUpper(s[:1]) + s[1:]
 }
 
 // PlayStoreTemplate is Android 12 with Google Play from the given image.

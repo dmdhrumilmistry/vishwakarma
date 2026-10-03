@@ -86,16 +86,22 @@ func TestConfigValidate(t *testing.T) {
 
 func TestMacOSInstalledTemplate(t *testing.T) {
 	p, _ := ParsePolicy(nil)
-	if _, ok := p.Template("macos-linux-installed"); ok {
+	if _, ok := p.Template("macos-ventura-linux"); ok {
 		t.Error("no installed macOS template without a base image")
 	}
-	p, err := ParsePolicy([]byte("macosLinuxBaseImage: registry.lan/macos-ventura:13"))
+	p, err := ParsePolicy([]byte("macosLinuxBaseImages: {ventura: registry.lan/vishwakarma-macos:ventura, tahoe: registry.lan/vishwakarma-macos:tahoe}"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	tpl, ok := p.Template("macos-linux-installed")
-	if !ok || tpl.InitImage != "registry.lan/macos-ventura:13" || tpl.Env["NOPICKER"] != "true" || !tpl.MacOSOnLinux {
+	tpl, ok := p.Template("macos-ventura-linux")
+	if !ok || tpl.InitImage != "registry.lan/vishwakarma-macos:ventura" || tpl.Env["NOPICKER"] != "true" || !tpl.MacOSOnLinux {
 		t.Fatalf("installed template %+v", tpl)
+	}
+	if tpl.DisplayName != "macOS Ventura on Linux (installed)" {
+		t.Errorf("display name %q", tpl.DisplayName)
+	}
+	if tahoe, ok := p.Template("macos-tahoe-linux"); !ok || tahoe.InitImage != "registry.lan/vishwakarma-macos:tahoe" {
+		t.Errorf("one template per flavor: %+v", tahoe)
 	}
 	if tpl.Env["IMAGE_PATH"] != "/data/mac_hdd_ng.img" || tpl.Resources.Disk == "" {
 		t.Errorf("installed macOS must boot from the /data volume: %+v", tpl)

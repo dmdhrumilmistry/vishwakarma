@@ -6,7 +6,7 @@
 # through your machine.
 #
 #   images/macos-base/snapshot.sh <sandbox> [image]
-#   images/macos-base/snapshot.sh macos docker.io/you/vishwakarma-macos-ventura:13
+#   images/macos-base/snapshot.sh macos docker.io/you/vishwakarma-macos:ventura
 #
 # Before running:
 #   1. Finish the macOS install (and the Setup Assistant if you want your
@@ -19,19 +19,25 @@
 #   3. Make the repository PRIVATE on Docker Hub first. The image contains
 #      Apple's operating system; publishing it is redistribution.
 #
-# Then set sandboxes.macosLinuxBaseImage=<image> and
-# sandboxes.imagePullSecrets=[dockerhub] in the chart.
+# Then add the image under sandboxes.macosLinuxBaseImages (flavor: image)
+# and set sandboxes.imagePullSecrets=[dockerhub] in the chart.
+#
+# NO_PUSH=1 builds the image as a tarball on the sandbox volume instead
+# (/data/.snapshot/image.tar) and needs no registry secret. Import it on the
+# node with `sudo k3s ctr -n k8s.io images import <tar>` to use it locally,
+# and push it later with `ctr images push` or any registry client.
 set -eu
 
 NAME="${1:?usage: snapshot.sh <sandbox> [image]}"
-IMAGE="${2:-docker.io/dmdhrumilmistry/vishwakarma-macos-ventura:13}"
+IMAGE="${2:-docker.io/dmdhrumilmistry/vishwakarma-macos:ventura}"
 NS="${NAMESPACE:-vishwakarma-sandboxes}"
 SECRET="${PUSH_SECRET:-dockerhub}"
 OSX_IMAGE="${OSX_IMAGE:-sickcodes/docker-osx:latest}"
 KANIKO="${KANIKO:-gcr.io/kaniko-project/executor:v1.23.2}"
 JOB="$NAME-snapshot"
 
-kubectl -n "$NS" get secret "$SECRET" >/dev/null
+NO_PUSH="${NO_PUSH:-0}"
+[ "$NO_PUSH" = 1 ] || kubectl -n "$NS" get secret "$SECRET" >/dev/null
 kubectl -n "$NS" get pvc "$NAME-data" >/dev/null
 
 echo "stopping $NAME so its disk is consistent"
@@ -77,18 +83,23 @@ spec:
             - --destination=$IMAGE
             - --single-snapshot
             - --compressed-caching=false
+$(if [ "$NO_PUSH" = 1 ]; then printf '            - --no-push
+            - --tar-path=/data/.snapshot/image.tar
+'; fi)
           volumeMounts:
             - {name: data, mountPath: /data}
-            - {name: docker-config, mountPath: /kaniko/.docker}
+$(if [ "$NO_PUSH" != 1 ]; then printf '            - {name: docker-config, mountPath: /kaniko/.docker}
+'; fi)
       volumes:
         - name: data
           persistentVolumeClaim:
             claimName: $NAME-data
-        - name: docker-config
+$(if [ "$NO_PUSH" != 1 ]; then printf '        - name: docker-config
           secret:
-            secretName: $SECRET
+            secretName: %s
             items:
               - {key: .dockerconfigjson, path: config.json}
+' "$SECRET"; fi)
 EOF
 
 echo "compressing and pushing (this takes a while)"
@@ -107,5 +118,9 @@ kubectl -n "$NS" logs "job/$JOB" -c push --tail=5
 
 echo "starting $NAME again"
 kubectl -n "$NS" scale deploy "$NAME" --replicas=1
-echo "pushed $IMAGE"
+if [ "$NO_PUSH" = 1 ]; then
+	echo "built $IMAGE as /data/.snapshot/image.tar on the $NAME-data volume"
+else
+	echo "pushed $IMAGE"
+fi
 echo "The build context stays at /data/.snapshot on the sandbox volume until you delete it or the sandbox."
