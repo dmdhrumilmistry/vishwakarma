@@ -497,11 +497,13 @@ func DefaultTemplates() []Template {
 			Ports:  []int32{10022},
 			Screen: &Screen{Port: 5999},
 			KVM:    KVMPrefer,
-			// QEMU's software emulation of AVX and AES-NI trips macOS's
-			// corecrypto self-test (kernel panic at boot); without KVM,
-			// offer the guest plain SSE so it takes the generic code paths.
+			// Without KVM: QEMU's emulation of AES-NI/PCLMULQDQ trips macOS's
+			// corecrypto self-test (kernel panic at boot), so hide those;
+			// keep a Haswell model, because Ventura's system libraries (the
+			// dyld shared cache) need AVX2 and first boot hangs without it.
 			EmulatedEnv: map[string]string{
-				"CPUID_FLAGS": "vendor=GenuineIntel,+invtsc,vmware-cpuid-freq=on,+ssse3,+sse4.2,+popcnt,check,",
+				"CPU":         "Haswell-noTSX",
+				"CPUID_FLAGS": "vendor=GenuineIntel,+invtsc,vmware-cpuid-freq=on,-aes,-pclmulqdq,check,",
 			},
 			ReserveMemory: true,
 			// 3 GB guest (RAM above), QEMU's translation cache and overhead.

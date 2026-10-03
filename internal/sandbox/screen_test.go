@@ -97,14 +97,17 @@ func TestMacOSOnLinux(t *testing.T) {
 	if !sb.Emulated {
 		t.Error("sandbox must report software emulation")
 	}
-	flags := ""
+	env := map[string]string{}
 	for _, e := range c.Env {
-		if e.Name == "CPUID_FLAGS" {
-			flags = e.Value
-		}
+		env[e.Name] = e.Value
 	}
-	if flags == "" || strings.Contains(flags, "avx") || strings.Contains(flags, "aes") {
-		t.Errorf("emulated macOS needs CPUID flags without AVX/AES (corecrypto panics otherwise): %q", flags)
+	// Emulated macOS: no AES-NI/PCLMULQDQ (corecrypto panics) but AVX2
+	// (Ventura's dyld cache needs it).
+	if flags := env["CPUID_FLAGS"]; !strings.Contains(flags, "-aes") || !strings.Contains(flags, "-pclmulqdq") {
+		t.Errorf("emulated macOS must hide AES-NI and PCLMULQDQ: %q", flags)
+	}
+	if env["CPU"] != "Haswell-noTSX" {
+		t.Errorf("emulated macOS needs an AVX2 CPU model, got %q", env["CPU"])
 	}
 	if c.SecurityContext.Privileged != nil {
 		t.Error("Docker-OSX must not run privileged")
@@ -152,8 +155,8 @@ func TestMacOSOnLinux(t *testing.T) {
 		t.Error("with KVM the sandbox is not emulated")
 	}
 	for _, e := range c.Env {
-		if e.Name == "CPUID_FLAGS" {
-			t.Error("with KVM the image's own CPU flags apply")
+		if e.Name == "CPUID_FLAGS" || e.Name == "CPU" {
+			t.Error("with KVM the image's own CPU settings apply")
 		}
 	}
 

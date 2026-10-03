@@ -157,8 +157,10 @@ open the Screen tab, then:
   native speed. If none does, it runs under QEMU software emulation instead
   of waiting forever, and the console marks it as emulated: booting takes
   many minutes and installing macOS takes hours. Under emulation the guest
-  CPU is offered without AVX and AES-NI: QEMU's emulation of those makes
-  macOS's corecrypto self-test panic the kernel at boot. On a VMware or Hyper-V node
+  gets a Haswell CPU model without AES-NI and PCLMULQDQ: QEMU's emulation of
+  those makes macOS's corecrypto self-test panic the kernel at boot, while
+  Ventura's system libraries need AVX2 (without it the first boot after the
+  install hangs and the system has to be reinstalled). On a VMware or Hyper-V node
   VM, enable nested virtualization (VMware: "Virtualize Intel VT-x/EPT";
   VMware cannot do this while Windows runs Hyper-V, for example for WSL2 or
   Docker Desktop).

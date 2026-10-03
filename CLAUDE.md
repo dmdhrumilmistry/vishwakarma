@@ -119,8 +119,12 @@ localhost; never type real credentials into non-localhost pages.
   the installer and boots the installed disk; `IMAGE_PATH` moves the disk.
   QEMU runs with `-monitor stdio`, so `kubectl attach -i` can send
   `system_powerdown` for a clean shutdown.
-- Without `/dev/kvm` it runs under TCG: offer no AVX/AES-NI
-  (`emulatedEnv` CPUID_FLAGS) or corecrypto panics at boot; TCG adds up to
+- Without `/dev/kvm` it runs under TCG: use `CPU=Haswell-noTSX` with
+  `-aes,-pclmulqdq` (`emulatedEnv`). AES-NI/PCLMUL emulation makes corecrypto
+  panic at boot; a CPU without AVX2 (Penryn) installs but hangs on first boot
+  at "dyld_cache: opened shared cache directory" (zero disk I/O, busy CPU),
+  leaving "needs to be reinstalled". The OpenCore picker defaults to the
+  recovery image; `NOPICKER=true` boots the installed disk. TCG adds up to
   1 GiB of translation cache, so a 3 GB guest fits a 4.5 GiB limit and a
   4 GB guest gets OOM-killed. Installing Ventura took about 3 hours.
 - VMware on a Windows host running Hyper-V (WSL2, Docker Desktop) cannot
