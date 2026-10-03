@@ -58,7 +58,7 @@ vishwakarma agent --backend simulator --public-host 127.0.0.1
 
 ```bash
 make image VERSION=dev
-docker save ghcr.io/dmdhrumilmistry/vishwakarma:dev | ssh node 'sudo k3s ctr -n k8s.io images import -'
+docker save docker.io/dmdhrumilmistry/vishwakarma:dev | ssh node 'sudo k3s ctr -n k8s.io images import -'
 helm upgrade --install vishwakarma ../helm-charts/vishwakarma -n vishwakarma --create-namespace \
   --set image.tag=dev --set image.pullPolicy=Never
 ```

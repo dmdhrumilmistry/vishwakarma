@@ -84,8 +84,8 @@ default:
 
 | Template | Image |
 |---|---|
-| Android 12 with Play Store | `ghcr.io/dmdhrumilmistry/vishwakarma-redroid-playstore:12` |
-| Android 12 with Play Store (unrooted) | `ghcr.io/dmdhrumilmistry/vishwakarma-redroid-playstore:12-unrooted` |
+| Android 12 with Play Store | `docker.io/dmdhrumilmistry/vishwakarma-redroid-playstore:12` |
+| Android 12 with Play Store (unrooted) | `docker.io/dmdhrumilmistry/vishwakarma-redroid-playstore:12-unrooted` |
 
 Point them at your own builds, or set them to `""` to remove the templates:
 

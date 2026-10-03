@@ -115,6 +115,18 @@ func TestMacOSOnLinux(t *testing.T) {
 	if !sb.Screen || d.Annotations[AnnScreenPort] != "5999" {
 		t.Errorf("screen %v %q", sb.Screen, d.Annotations[AnnScreenPort])
 	}
+	// The install persists: a /data volume holds the disk image, created
+	// once by an init container from the same image.
+	ics := d.Spec.Template.Spec.InitContainers
+	if len(ics) != 1 || ics[0].Image != c.Image || len(ics[0].VolumeMounts) != 1 || ics[0].VolumeMounts[0].MountPath != "/data" {
+		t.Errorf("init containers %+v", ics)
+	}
+	if len(c.VolumeMounts) != 1 || c.VolumeMounts[0].MountPath != "/data" {
+		t.Errorf("macOS disk volume %+v", c.VolumeMounts)
+	}
+	if _, err := on.kube.CoreV1().PersistentVolumeClaims(ns).Get(ctx, "osx-data", metav1.GetOptions{}); err != nil {
+		t.Errorf("data claim: %v", err)
+	}
 
 	// A node with /dev/kvm: request the device.
 	withKVM := newFixture(t, func(p *config.Policy) { p.MacOSOnLinux = true })

@@ -48,10 +48,12 @@ type plan struct {
 	Emulated bool
 	// ReserveMemory requests the full memory limit.
 	ReserveMemory bool
-	SSHKey        string
-	CloudInit     string
-	Owner         string
-	ExpiresAt     time.Time
+	// Init is the command of a one-shot init container (same image).
+	Init      []string
+	SSHKey    string
+	CloudInit string
+	Owner     string
+	ExpiresAt time.Time
 }
 
 func (p *plan) labels() map[string]string {
@@ -158,6 +160,21 @@ func buildDeployment(p *plan, pol *config.Policy) *appsv1.Deployment {
 		Tolerations:                   tolerations(pol.Tolerations),
 		ImagePullSecrets:              pullSecrets(pol.ImagePullSecrets),
 	}
+	if len(p.Init) > 0 {
+		no := false
+		spec.InitContainers = []corev1.Container{{
+			Name:            "init",
+			Image:           p.Image,
+			ImagePullPolicy: corev1.PullIfNotPresent,
+			Command:         p.Init,
+			Env:             envVars(p.Env),
+			Resources: corev1.ResourceRequirements{
+				Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("10m"), corev1.ResourceMemory: resource.MustParse("32Mi")},
+				Limits:   corev1.ResourceList{corev1.ResourceMemory: resource.MustParse("256Mi")},
+			},
+			SecurityContext: &corev1.SecurityContext{AllowPrivilegeEscalation: &no},
+		}}
+	}
 	if p.Screen != nil && p.Screen.Sidecar == config.ScreenSidecarAndroid {
 		spec.Containers = append(spec.Containers, androidScreen(p, pol))
 	}
@@ -169,6 +186,9 @@ func buildDeployment(p *plan, pol *config.Policy) *appsv1.Deployment {
 			}},
 		}}
 		spec.Containers[0].VolumeMounts = []corev1.VolumeMount{{Name: "data", MountPath: "/data"}}
+		for i := range spec.InitContainers {
+			spec.InitContainers[i].VolumeMounts = []corev1.VolumeMount{{Name: "data", MountPath: "/data"}}
+		}
 	}
 
 	d := &appsv1.Deployment{

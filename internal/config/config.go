@@ -219,6 +219,10 @@ type Template struct {
 	// really use all of it, such as a QEMU guest: overcommitting those can
 	// push a node into swap until it stops responding.
 	ReserveMemory bool `json:"reserveMemory,omitempty"`
+	// Init runs once before the sandbox starts, as an init container from
+	// the same image with the same env and /data volume (for example to
+	// create a disk image on the volume).
+	Init []string `json:"init,omitempty"`
 	// EmulatedEnv is added to Env when the sandbox runs without /dev/kvm.
 	EmulatedEnv map[string]string `json:"emulatedEnv,omitempty"`
 	// KVM is "prefer" (use /dev/kvm when a node has it, else run under
@@ -246,7 +250,7 @@ type Screen struct {
 const ScreenSidecarAndroid = "android"
 
 // DefaultAndroidScreenImage is set by main to the image of this release.
-var DefaultAndroidScreenImage = "ghcr.io/dmdhrumilmistry/vishwakarma-android-screen:latest"
+var DefaultAndroidScreenImage = "docker.io/dmdhrumilmistry/vishwakarma-android-screen:latest"
 
 // Duration is a time.Duration that reads "4h" style strings from YAML.
 type Duration struct{ time.Duration }
@@ -373,8 +377,8 @@ func DefaultPolicy() *Policy {
 
 // Published Play Store images (built by the release workflow).
 const (
-	DefaultPlayStoreImage         = "ghcr.io/dmdhrumilmistry/vishwakarma-redroid-playstore:12"
-	DefaultPlayStoreUnrootedImage = "ghcr.io/dmdhrumilmistry/vishwakarma-redroid-playstore:12-unrooted"
+	DefaultPlayStoreImage         = "docker.io/dmdhrumilmistry/vishwakarma-redroid-playstore:12"
+	DefaultPlayStoreUnrootedImage = "docker.io/dmdhrumilmistry/vishwakarma-redroid-playstore:12-unrooted"
 )
 
 // PlayStoreTemplate is Android 12 with Google Play from the given image.
@@ -427,7 +431,11 @@ func DefaultTemplates() []Template {
 				"SHORTNAME": "ventura",
 				"RAM":       "4",
 				"EXTRA":     "-display none -vnc 0.0.0.0:99",
+				// The installed system lives on the persistent /data volume,
+				// so it survives stop, start and restarts.
+				"IMAGE_PATH": "/data/mac_hdd_ng.img",
 			},
+			Init:   []string{"/bin/sh", "-c", "[ -e /data/mac_hdd_ng.img ] || qemu-img create -f qcow2 /data/mac_hdd_ng.img 64G"},
 			Ports:  []int32{10022},
 			Screen: &Screen{Port: 5999},
 			KVM:    KVMPrefer,
@@ -439,9 +447,9 @@ func DefaultTemplates() []Template {
 			},
 			ReserveMemory: true,
 			// 4 GiB guest (RAM above) plus QEMU's own overhead.
-			Resources:    Resources{CPU: "4", Memory: "4608Mi"},
+			Resources:    Resources{CPU: "4", Memory: "4608Mi", Disk: "50Gi"},
 			MacOSOnLinux: true,
-			Description:  "macOS installer under QEMU (Docker-OSX). Fast with /dev/kvm on the node, very slow without. SSH on 10022 once Remote Login is on. Not licensed by Apple on non-Apple hardware",
+			Description:  "macOS under QEMU (Docker-OSX): install it once from the Screen tab, it is kept on the /data volume. Fast with /dev/kvm on the node, very slow without. SSH on 10022 once Remote Login is on. Not licensed by Apple on non-Apple hardware",
 		},
 		{Name: "ubuntu-24.04-vm", DisplayName: "Ubuntu 24.04 VM", Kind: KindVM, Image: "quay.io/containerdisks/ubuntu:24.04", User: "ubuntu", Resources: Resources{Memory: "2Gi"}, Description: "Full Ubuntu VM with systemd and its own kernel"},
 		{Name: "fedora-vm", DisplayName: "Fedora VM", Kind: KindVM, Image: "quay.io/containerdisks/fedora:latest", User: "fedora", Resources: Resources{Memory: "2Gi"}, Description: "Full Fedora VM"},

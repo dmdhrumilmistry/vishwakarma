@@ -1,6 +1,6 @@
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -s -w -X main.version=$(VERSION)
-IMAGE ?= ghcr.io/dmdhrumilmistry/vishwakarma
+IMAGE ?= docker.io/dmdhrumilmistry/vishwakarma
 XTERM_VERSION := 6.0.0
 XTERM_FIT_VERSION := 0.11.0
 

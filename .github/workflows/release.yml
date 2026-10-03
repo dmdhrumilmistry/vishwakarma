@@ -1,7 +1,9 @@
 name: release
 
-# main publishes ghcr.io/<owner>/vishwakarma:main; a v* tag publishes the
-# versioned image (and :latest).
+# Images go to Docker Hub (docker.io/<DOCKERHUB_USERNAME>/...). The
+# repository needs the DOCKERHUB_USERNAME and DOCKERHUB_TOKEN secrets (a
+# Docker Hub access token with read and write scope). main publishes
+# :main; a v* tag publishes the version (and :latest) plus the binaries.
 on:
   push:
     branches: [main]
@@ -10,7 +12,9 @@ on:
 
 permissions:
   contents: write
-  packages: write
+
+env:
+  NAMESPACE: docker.io/${{ secrets.DOCKERHUB_USERNAME }}
 
 jobs:
   image:
@@ -23,13 +27,12 @@ jobs:
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
       - id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ github.repository_owner }}/vishwakarma
+          images: ${{ env.NAMESPACE }}/vishwakarma
           tags: |
             type=ref,event=branch
             type=sha,format=short
@@ -54,13 +57,12 @@ jobs:
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
       - id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ github.repository_owner }}/vishwakarma-android-screen
+          images: ${{ env.NAMESPACE }}/vishwakarma-android-screen
           tags: |
             type=ref,event=branch
             type=semver,pattern={{version}}
@@ -86,13 +88,11 @@ jobs:
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
       - name: build and push
-        env:
-          REPO: ghcr.io/${{ github.repository_owner }}/vishwakarma-redroid-playstore
         run: |
+          REPO="$NAMESPACE/vishwakarma-redroid-playstore"
           IMAGE="$REPO:12" sh images/android-playstore/build.sh
           UNROOTED=1 IMAGE="$REPO:12-unrooted" sh images/android-playstore/build.sh
           docker push "$REPO:12"

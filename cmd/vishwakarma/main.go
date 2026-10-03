@@ -90,7 +90,7 @@ func blockAPIServer(clients *kube.Clients, p *config.Policy, log *slog.Logger) {
 func serve() error {
 	if version != "dev" {
 		// The Android screen sidecar is released with the server.
-		config.DefaultAndroidScreenImage = "ghcr.io/dmdhrumilmistry/vishwakarma-android-screen:" + strings.TrimPrefix(version, "v")
+		config.DefaultAndroidScreenImage = "docker.io/dmdhrumilmistry/vishwakarma-android-screen:" + strings.TrimPrefix(version, "v")
 	}
 	cfg, err := config.Load()
 	if err != nil {

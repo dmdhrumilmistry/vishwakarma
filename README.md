@@ -39,6 +39,16 @@ Named after the divine architect and builder of Hindu tradition.
   VirtualMachine plus owned children, found by labels.
 - **REST API** with bearer tokens for CI and scripts.
 
+## Images
+
+Published on Docker Hub by the release workflow:
+
+| Image | What |
+|---|---|
+| `docker.io/dmdhrumilmistry/vishwakarma` | server and Mac host agent |
+| `docker.io/dmdhrumilmistry/vishwakarma-android-screen` | Android screen sidecar |
+| `docker.io/dmdhrumilmistry/vishwakarma-redroid-playstore:12`, `:12-unrooted` | Android 12 with Google Play |
+
 ## Install
 
 The Helm chart lives in

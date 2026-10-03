@@ -141,8 +141,16 @@ For Linux clusters there is also a **real** macOS option: the
 (macOS under QEMU with OpenCore) as a container. On first start it downloads
 the macOS recovery image from Apple (Ventura by default; set `SHORTNAME` in
 a template of your own for another version) and boots the **installer**:
-open the Screen tab, erase the virtual disk in Disk Utility, then install
-macOS. SSH on port 10022 works once you turn on Remote Login in the guest.
+open the Screen tab, then:
+
+1. **Disk Utility**: select the `QEMU HARDDISK Media` (64 GB), **Erase** it
+   as APFS (any name, for example `Macintosh HD`), then quit Disk Utility.
+2. **Reinstall macOS Ventura**: agree to the license and pick that disk.
+   The installer downloads macOS from Apple and reboots several times.
+3. After the last reboot, pick the installed disk in the OpenCore picker if
+   it does not boot on its own, and walk through the setup assistant.
+4. Turn on **System Settings > General > Sharing > Remote Login** for SSH
+   on port 10022.
 
 - **KVM is used when available.** If a node offers `/dev/kvm` (KubeVirt's
   `devices.kubevirt.io/kvm`), the sandbox requests it and runs at near
@@ -157,9 +165,12 @@ macOS. SSH on port 10022 works once you turn on Remote Login in the guest.
 - **Memory is reserved in full** (4.5 GiB: a 4 GiB guest plus QEMU), so the
   sandbox only lands on a node with that much free and cannot push a node
   into swap. On a small single node, trim KubeVirt (see [vms.md](vms.md)).
-- **The install is not persistent.** The virtual disk lives in the
-  container, so stopping or deleting the sandbox loses it. A full macOS
-  install also needs 30 GB or more of free node disk.
+- **The install persists.** The sandbox gets a 50 GiB volume at `/data`;
+  an init container creates the 64 GB virtual disk there once, and QEMU
+  uses it (`IMAGE_PATH`). Install macOS once, then stop and start the
+  sandbox freely: the OpenCore picker boots the installed system. Deleting
+  the sandbox deletes the volume. The node needs about 35 GB free for an
+  install (the volume is thin: it grows as macOS writes).
 - **Apple's license only permits macOS on Apple hardware.** Running it on
   other hardware breaks the macOS license. The template is off until you
   set `sandboxes.macosOnLinux: true`; that decision is yours.
