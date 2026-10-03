@@ -97,6 +97,15 @@ func TestMacOSOnLinux(t *testing.T) {
 	if !sb.Emulated {
 		t.Error("sandbox must report software emulation")
 	}
+	flags := ""
+	for _, e := range c.Env {
+		if e.Name == "CPUID_FLAGS" {
+			flags = e.Value
+		}
+	}
+	if flags == "" || strings.Contains(flags, "avx") || strings.Contains(flags, "aes") {
+		t.Errorf("emulated macOS needs CPUID flags without AVX/AES (corecrypto panics otherwise): %q", flags)
+	}
 	if c.SecurityContext.Privileged != nil {
 		t.Error("Docker-OSX must not run privileged")
 	}
@@ -129,6 +138,11 @@ func TestMacOSOnLinux(t *testing.T) {
 	}
 	if sb.Emulated {
 		t.Error("with KVM the sandbox is not emulated")
+	}
+	for _, e := range c.Env {
+		if e.Name == "CPUID_FLAGS" {
+			t.Error("with KVM the image's own CPU flags apply")
+		}
 	}
 
 	// A custom image keeps neither the template's devices nor its screen.

@@ -227,6 +227,11 @@ func (m *Manager) resolve(ctx context.Context, s Spec, caller Caller) (*plan, er
 			return nil, invalid("environment variable name %q is not valid", k)
 		}
 	}
+	if p.Emulated {
+		for k, v := range tpl.EmulatedEnv {
+			env[k] = v
+		}
+	}
 	p.Env = env
 
 	ports := s.Ports

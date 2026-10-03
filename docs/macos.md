@@ -148,7 +148,9 @@ macOS. SSH on port 10022 works once you turn on Remote Login in the guest.
   `devices.kubevirt.io/kvm`), the sandbox requests it and runs at near
   native speed. If none does, it runs under QEMU software emulation instead
   of waiting forever, and the console marks it as emulated: booting takes
-  many minutes and installing macOS takes hours. On a VMware or Hyper-V node
+  many minutes and installing macOS takes hours. Under emulation the guest
+  CPU is offered without AVX and AES-NI: QEMU's emulation of those makes
+  macOS's corecrypto self-test panic the kernel at boot. On a VMware or Hyper-V node
   VM, enable nested virtualization (VMware: "Virtualize Intel VT-x/EPT";
   VMware cannot do this while Windows runs Hyper-V, for example for WSL2 or
   Docker Desktop).

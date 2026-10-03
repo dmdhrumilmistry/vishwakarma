@@ -219,6 +219,8 @@ type Template struct {
 	// really use all of it, such as a QEMU guest: overcommitting those can
 	// push a node into swap until it stops responding.
 	ReserveMemory bool `json:"reserveMemory,omitempty"`
+	// EmulatedEnv is added to Env when the sandbox runs without /dev/kvm.
+	EmulatedEnv map[string]string `json:"emulatedEnv,omitempty"`
 	// KVM is "prefer" (use /dev/kvm when a node has it, else run under
 	// software emulation) or "require" (wait for a node with it). The device
 	// comes from KubeVirt's device plugin (devices.kubevirt.io/kvm).
@@ -426,9 +428,15 @@ func DefaultTemplates() []Template {
 				"RAM":       "4",
 				"EXTRA":     "-display none -vnc 0.0.0.0:99",
 			},
-			Ports:         []int32{10022},
-			Screen:        &Screen{Port: 5999},
-			KVM:           KVMPrefer,
+			Ports:  []int32{10022},
+			Screen: &Screen{Port: 5999},
+			KVM:    KVMPrefer,
+			// QEMU's software emulation of AVX and AES-NI trips macOS's
+			// corecrypto self-test (kernel panic at boot); without KVM,
+			// offer the guest plain SSE so it takes the generic code paths.
+			EmulatedEnv: map[string]string{
+				"CPUID_FLAGS": "vendor=GenuineIntel,+invtsc,vmware-cpuid-freq=on,+ssse3,+sse4.2,+popcnt,check,",
+			},
 			ReserveMemory: true,
 			// 4 GiB guest (RAM above) plus QEMU's own overhead.
 			Resources:    Resources{CPU: "4", Memory: "4608Mi"},
