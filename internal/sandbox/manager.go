@@ -197,7 +197,7 @@ func (m *Manager) resolve(ctx context.Context, s Spec, caller Caller) (*plan, er
 			}
 		}
 		p.ReserveMemory = tpl.ReserveMemory
-		p.Init = tpl.Init
+		p.Init, p.InitImage = tpl.Init, tpl.InitImage
 		if tpl.KVM != "" {
 			switch has := m.KVMAvailable(ctx); {
 			case has:

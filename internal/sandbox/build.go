@@ -48,8 +48,10 @@ type plan struct {
 	Emulated bool
 	// ReserveMemory requests the full memory limit.
 	ReserveMemory bool
-	// Init is the command of a one-shot init container (same image).
-	Init      []string
+	// Init is the command of a one-shot init container.
+	Init []string
+	// InitImage is the init container image; the sandbox image when empty.
+	InitImage string
 	SSHKey    string
 	CloudInit string
 	Owner     string
@@ -162,9 +164,13 @@ func buildDeployment(p *plan, pol *config.Policy) *appsv1.Deployment {
 	}
 	if len(p.Init) > 0 {
 		no := false
+		initImage := p.InitImage
+		if initImage == "" {
+			initImage = p.Image
+		}
 		spec.InitContainers = []corev1.Container{{
 			Name:            "init",
-			Image:           p.Image,
+			Image:           initImage,
 			ImagePullPolicy: corev1.PullIfNotPresent,
 			Command:         p.Init,
 			Env:             envVars(p.Env),

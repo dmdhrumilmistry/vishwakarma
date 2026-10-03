@@ -96,8 +96,13 @@ type Policy struct {
 	// "user" release-keys build), for apps that refuse rooted devices. It
 	// adds "Android 12 with Play Store (unrooted)". Empty removes it.
 	AndroidPlayStoreUnrootedImage string `json:"androidPlayStoreUnrootedImage"`
-	AllowNodePort                 bool   `json:"allowNodePort"`
-	StorageClass                  string `json:"storageClass"`
+	// MacOSLinuxBaseImage carries an installed macOS disk
+	// (images/macos-base). With MacOSOnLinux it adds a template that boots
+	// that system directly instead of the installer. Keep the image
+	// private: it contains Apple's operating system.
+	MacOSLinuxBaseImage string `json:"macosLinuxBaseImage"`
+	AllowNodePort       bool   `json:"allowNodePort"`
+	StorageClass        string `json:"storageClass"`
 
 	Defaults Resources `json:"defaults"`
 	Limits   Resources `json:"limits"`
@@ -223,6 +228,9 @@ type Template struct {
 	// the same image with the same env and /data volume (for example to
 	// create a disk image on the volume).
 	Init []string `json:"init,omitempty"`
+	// InitImage runs Init from another image (for example one that carries
+	// a prebuilt disk) instead of the sandbox image.
+	InitImage string `json:"initImage,omitempty"`
 	// EmulatedEnv is added to Env when the sandbox runs without /dev/kvm.
 	EmulatedEnv map[string]string `json:"emulatedEnv,omitempty"`
 	// KVM is "prefer" (use /dev/kvm when a node has it, else run under
@@ -339,6 +347,9 @@ func ParsePolicy(raw []byte) (*Policy, error) {
 		if p.AndroidPlayStoreUnrootedImage != "" {
 			p.Templates = append(p.Templates, PlayStoreTemplate(p.AndroidPlayStoreUnrootedImage, true))
 		}
+		if p.MacOSLinuxBaseImage != "" {
+			p.Templates = append(p.Templates, MacOSInstalledTemplate(p.MacOSLinuxBaseImage))
+		}
 	}
 	if p.AndroidScreenImage == "" {
 		p.AndroidScreenImage = DefaultAndroidScreenImage
@@ -380,6 +391,34 @@ const (
 	DefaultPlayStoreImage         = "docker.io/dmdhrumilmistry/vishwakarma-redroid-playstore:12"
 	DefaultPlayStoreUnrootedImage = "docker.io/dmdhrumilmistry/vishwakarma-redroid-playstore:12-unrooted"
 )
+
+// MacOSInstalledTemplate boots an installed macOS from a base disk image
+// instead of the installer. The init container copies the disk onto the
+// sandbox volume once; later starts reuse it. No recovery image, no boot
+// picker: OpenCore boots the installed disk directly.
+func MacOSInstalledTemplate(baseImage string) Template {
+	var t Template
+	for _, d := range DefaultTemplates() {
+		if d.Name == "macos-linux" {
+			t = d
+		}
+	}
+	env := map[string]string{}
+	for k, v := range t.Env {
+		env[k] = v
+	}
+	env["NOPICKER"] = "true"
+	// Docker-OSX downloads the recovery image unless this file exists;
+	// the installed system does not need it.
+	env["BASESYSTEM_IMAGE"] = "/data/.no-recovery"
+	t.Env = env
+	t.Name = "macos-linux-installed"
+	t.DisplayName = "macOS on Linux (installed)"
+	t.InitImage = baseImage
+	t.Init = []string{"/bin/sh", "-c", "[ -e /data/mac_hdd_ng.img ] || cp /disk/mac_hdd_ng.img /data/mac_hdd_ng.img; touch /data/.no-recovery"}
+	t.Description = "Installed macOS under QEMU (Docker-OSX), ready to use: the disk comes from a base image and is kept on the /data volume. Not licensed by Apple on non-Apple hardware"
+	return t
+}
 
 // PlayStoreTemplate is Android 12 with Google Play from the given image.
 func PlayStoreTemplate(image string, unrooted bool) Template {

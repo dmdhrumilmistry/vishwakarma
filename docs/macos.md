@@ -179,6 +179,42 @@ open the Screen tab, then:
 The server reads nodes (a read-only ClusterRole in the chart) to find out
 whether any node has `/dev/kvm`.
 
+### Install once, spawn ready
+
+Installing macOS under emulation takes hours. Do it once, then turn that
+sandbox into a base image; new sandboxes from the **macOS on Linux
+(installed)** template boot it directly (no installer, no recovery
+download, no boot picker), in minutes once the node has cached the image.
+
+1. Finish the install (and the Setup Assistant, if every copy should have
+   your user), then shut macOS down from its Apple menu.
+2. Create a **private** repository on Docker Hub. The image holds Apple's
+   operating system; publishing it is redistribution.
+3. Store a Docker Hub access token in the sandbox namespace (used to push
+   the image and to pull it later):
+
+   ```bash
+   kubectl -n vishwakarma-sandboxes create secret docker-registry dockerhub      --docker-server=https://index.docker.io/v1/      --docker-username=<user> --docker-password=<access token>
+   ```
+
+4. Snapshot. A Job compresses the disk and kaniko pushes it from the node;
+   nothing large passes through your machine:
+
+   ```bash
+   images/macos-base/snapshot.sh macos docker.io/<user>/vishwakarma-macos-ventura:13
+   ```
+
+5. Point the chart at it:
+
+   ```yaml
+   sandboxes:
+     macosLinuxBaseImage: docker.io/<user>/vishwakarma-macos-ventura:13
+     imagePullSecrets: [dockerhub]
+   ```
+
+Each new sandbox copies the disk onto its own volume on first start, so
+copies are independent. The source sandbox keeps running as before.
+
 ## Trying it without a Mac: the simulator
 
 For a Linux cluster (development, CI, a lab) the chart can run an agent in

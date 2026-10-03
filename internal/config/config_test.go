@@ -84,6 +84,28 @@ func TestConfigValidate(t *testing.T) {
 	}
 }
 
+func TestMacOSInstalledTemplate(t *testing.T) {
+	p, _ := ParsePolicy(nil)
+	if _, ok := p.Template("macos-linux-installed"); ok {
+		t.Error("no installed macOS template without a base image")
+	}
+	p, err := ParsePolicy([]byte("macosLinuxBaseImage: registry.lan/macos-ventura:13"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tpl, ok := p.Template("macos-linux-installed")
+	if !ok || tpl.InitImage != "registry.lan/macos-ventura:13" || tpl.Env["NOPICKER"] != "true" || !tpl.MacOSOnLinux {
+		t.Fatalf("installed template %+v", tpl)
+	}
+	if tpl.Env["IMAGE_PATH"] != "/data/mac_hdd_ng.img" || tpl.Resources.Disk == "" {
+		t.Errorf("installed macOS must boot from the /data volume: %+v", tpl)
+	}
+	base, _ := p.Template("macos-linux")
+	if base.Env["NOPICKER"] == "true" || base.InitImage != "" {
+		t.Error("the installer template must not change")
+	}
+}
+
 func TestPlayStoreTemplate(t *testing.T) {
 	p, err := ParsePolicy(nil)
 	if err != nil {
