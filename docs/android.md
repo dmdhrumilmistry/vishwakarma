@@ -131,9 +131,9 @@ Create it with **Reachable from: On every node (NodePort)** to reach adb
 from your machine; the Overview tab shows the address and the command:
 
 ```bash
-adb connect 192.168.29.57:32652
+adb connect 192.168.1.10:32652
 adb shell getprop ro.build.version.release
-scrcpy -s 192.168.29.57:32652      # mirror and control the screen
+scrcpy -s 192.168.1.10:32652      # mirror and control the screen
 adb install app.apk
 ```
 
